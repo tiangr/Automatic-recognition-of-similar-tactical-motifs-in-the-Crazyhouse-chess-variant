@@ -682,9 +682,18 @@ function drawMiniBoard(canvas,fen,ori,sqSize){
 }
 
 function parsePocketStr(str){
+  // Handle dict object from backend
+  if(str && typeof str === 'object'){
+    const res={};
+    for(const [k,v] of Object.entries(str)) res[k.toUpperCase()]=v;
+    return res;
+  }
   if(!str||str==='—'||str==='-')return{};
   const res={};
-  for(const t of str.trim().split(/\s+/)){const m=t.match(/^([QRBNP])(\d+)$/);if(m)res[m[1]]=+m[2];}
+  for(const t of String(str).trim().split(/\s+/)){
+    const m=t.match(/^([QRBNP])(\d+)$/);
+    if(m)res[m[1]]=+m[2];
+  }
   return res;
 }
 function miniPocketHTML(pocketStr,side){
