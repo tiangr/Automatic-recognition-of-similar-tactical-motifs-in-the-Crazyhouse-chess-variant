@@ -165,6 +165,9 @@ canvas{display:block;image-rendering:pixelated}
         <button class="fb" onclick="setField('text_static')">text_static</button>
       </div>
       <div class="tbs">
+        <span class="tlbl">Rank</span>
+      </div>
+      <div class="tbs">
         <span class="si"><b id="sel-count">0</b> selected <span id="sel-hint" style="color:var(--text-dimmer)"></span></span>
         <button class="btn btn-g" onclick="clearSelection()">Clear</button>
         <button class="btn btn-p" id="export-btn" onclick="exportPGN()" disabled>Export PGN ↓</button>
@@ -777,6 +780,7 @@ function hitCardHTML(h,i){
 // FIELD / SELECTION / EXPORT
 // ─────────────────────────────────────────────
 function setField(f){currentField=f;document.querySelectorAll('.fb').forEach(b=>b.classList.toggle('active',b.textContent.trim()===f));}
+
 function toggleHit(id){selectedHits.has(id)?selectedHits.delete(id):selectedHits.add(id);const c=document.getElementById(`card_${cssId(id)}`);if(c){c.classList.toggle('sel',selectedHits.has(id));c.querySelector('.chk').textContent=selectedHits.has(id)?'✓':'';}updateExportBar();}
 function clearSelection(){selectedHits.clear();document.querySelectorAll('.hc.sel').forEach(c=>{c.classList.remove('sel');c.querySelector('.chk').textContent='';});updateExportBar();}
 function updateExportBar(){const n=selectedHits.size;document.getElementById('sel-count').textContent=n;document.getElementById('export-btn').disabled=n===0;document.getElementById('sel-hint').textContent=n>0?`(query + ${n} hit${n>1?'s':''})`:''}

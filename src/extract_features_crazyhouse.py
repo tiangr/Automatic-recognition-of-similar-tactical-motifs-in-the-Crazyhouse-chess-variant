@@ -172,6 +172,61 @@ def extract_features(rec: dict) -> dict:
         elif tok == "dyn:noCapture":
             f["DG_!F_noCapture"] = 1
 
+        # --- v3 new tokens ---
+
+        # Mating piece identity (Tier-4 per mentor)
+        elif tok.startswith("dyn:matingPiece:"):
+            piece = tok.split("dyn:matingPiece:")[1]
+            f[f"DG_!matingPiece_{piece}"] = 1
+        elif tok.startswith("dyn:mateDrop:"):
+            piece = tok.split("dyn:mateDrop:")[1]
+            f[f"DG_!mateDrop_{piece}"] = 1
+            f["DG_!F_mateByDrop"] = 1
+
+        # Sacrifice detection (Tier-4 per mentor)
+        elif tok == "dyn:hasSacrifice":
+            f["DG_!F_sacrifice"] = 1
+        elif tok == "pv:sacrifice":
+            f["DS_!sacrifice"] = 1
+        elif tok == "pv:dropSacrifice":
+            f["DS_!dropSacrifice"] = 1
+        elif tok.startswith("pv:sacrificePiece:"):
+            piece = tok.split("pv:sacrificePiece:")[1]
+            f[f"DS_!sacrificePiece_{piece}"] = 1
+
+        # Opponent captures (Tier-4 per mentor)
+        elif tok == "dyn:oppCaptures":
+            f["DG_!F_ox"] = 1
+        elif tok == "dyn:noOppCaptures":
+            f["DG_!F_noOx"] = 1
+
+        # Consecutive capture pairs (Tier-3 per mentor — key for similarity)
+        elif tok.startswith("dyn:capPair:"):
+            pair = tok.split("dyn:capPair:")[1]
+            f[f"DS_!capPair_{pair}"] = 1
+
+        # Per-piece capture totals
+        elif tok.startswith("dyn:capPieceTotal:"):
+            rest  = tok.split("dyn:capPieceTotal:")[1]
+            piece = rest[0]
+            count = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 1
+            f[f"DS_!capTotal_{piece}"] += count
+
+        # Drop proximity to enemy king (Crazyhouse-specific)
+        elif tok == "dyn:dropNearKing":
+            f["DS_!dropNearKing"] = 1
+        elif tok == "dyn:dropFarKing":
+            f["DS_!dropFarKing"] = 1
+
+        # Summary mating piece (from sum: block)
+        elif tok.startswith("sum:matingPiece:"):
+            piece = tok.split("sum:matingPiece:")[1]
+            f[f"sum_matingPiece_{piece}"] = 1
+        elif tok == "sum:hasSacrifice":
+            f["sum_hasSacrifice"] = 1
+        elif tok == "sum:oppCaptures":
+            f["sum_oppCaptures"] = 1
+
     f["ply"] = float(rec.get("ply", 0))
     return dict(f)
 
@@ -264,14 +319,41 @@ def main():
     print(f"\nTotal puzzles: {n_total:,}")
     print(f"Total columns: {len(columns)}")
 
-    print(f"\nConverting CSV to parquet ...")
-    df = pd.read_csv(OUT_CSV, low_memory=False)
-    df.to_parquet(OUT_PARQUET, index=False)
+    print(f"\nConverting CSV to parquet (chunked, tolerates column mismatches)...")
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    writer = None
+    schema = None
+    n_rows = 0
+
+    for chunk_df in pd.read_csv(OUT_CSV, chunksize=50_000, low_memory=False, on_bad_lines="skip"):
+        chunk_df = chunk_df.fillna(0)
+        table = pa.Table.from_pandas(chunk_df, preserve_index=False)
+
+        if writer is None:
+            schema = table.schema
+            writer = pq.ParquetWriter(OUT_PARQUET, schema)
+
+        try:
+            table = table.cast(schema)
+        except Exception:
+            for col in schema.names:
+                if col not in chunk_df.columns:
+                    chunk_df[col] = 0
+            chunk_df = chunk_df[schema.names]
+            table = pa.Table.from_pandas(chunk_df, schema=schema, preserve_index=False)
+
+        writer.write_table(table)
+        n_rows += len(chunk_df)
+
+    if writer:
+        writer.close()
 
     print(f"\nDone.")
     print(f"  {OUT_CSV}")
     print(f"  {OUT_PARQUET}")
-    print(f"  Shape: {df.shape}")
+    print(f"  Rows written: {n_rows:,}")
 
 
 if __name__ == "__main__":
