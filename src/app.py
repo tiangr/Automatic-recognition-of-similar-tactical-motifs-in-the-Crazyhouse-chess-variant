@@ -194,11 +194,21 @@ def search_by_fen():
 
 @app.route("/api/export", methods=["POST"])
 def export_labels():
-    data        = request.get_json()
-    query_id    = data.get("query_id", "")
-    query_fen   = data.get("query_fen", "")
-    similar_ids = set(data.get("similar_ids", []))
-    all_hit_ids = data.get("all_hit_ids", [])
+    data = request.get_json()
+
+    # ── Accept both calling conventions ─────────────────────────────────────
+    # Frontend sends:  { ids: [queryId, hit1, hit2, ...] }
+    if "ids" in data:
+        ids         = data["ids"]
+        query_id    = ids[0] if ids else ""
+        all_hit_ids = ids[1:]
+        similar_ids = set(all_hit_ids)   # all exported hits are "similar"
+        query_fen   = data.get("query_fen", "")
+    else:
+        query_id    = data.get("query_id", "")
+        query_fen   = data.get("query_fen", "")
+        similar_ids = set(data.get("similar_ids", []))
+        all_hit_ids = data.get("all_hit_ids", [])
 
     if not all_hit_ids:
         return jsonify({"error": "no hits provided"}), 400
@@ -219,8 +229,29 @@ def export_labels():
             "candidate_mate":         h_doc.get("mate_before"),
             "query_turn":             q_doc.get("turn", "") if q_doc else "",
             "candidate_turn":         h_doc.get("turn", ""),
+            "query_text_static":      q_doc.get("text_static", "") if q_doc else "",
+            "candidate_text_static":  h_doc.get("text_static", ""),
             "query_text_dynamic":     q_doc.get("text_dynamic", "") if q_doc else "",
             "candidate_text_dynamic": h_doc.get("text_dynamic", ""),
+            # Metadata fields — used by train_similarity.py as meta_ features
+            # Engine-derived
+            "query_meta_length":           q_doc.get("meta_length") if q_doc else None,
+            "query_meta_delta":            q_doc.get("meta_delta") if q_doc else None,
+            "query_meta_cp_before":        q_doc.get("meta_cp_before") if q_doc else None,
+            "query_meta_mate_in":          q_doc.get("meta_mate_in") if q_doc else None,
+            "candidate_meta_length":       h_doc.get("meta_length"),
+            "candidate_meta_delta":        h_doc.get("meta_delta"),
+            "candidate_meta_cp_before":    h_doc.get("meta_cp_before"),
+            "candidate_meta_mate_in":      h_doc.get("meta_mate_in"),
+            # Lichess-API-derived (present after enrich_with_ratings.py)
+            "query_meta_avg_rating":       q_doc.get("meta_avg_rating") if q_doc else None,
+            "query_meta_solver_rating":    q_doc.get("meta_solver_rating") if q_doc else None,
+            "query_meta_estimated_time":   q_doc.get("meta_estimated_time") if q_doc else None,
+            "query_meta_speed_ord":        q_doc.get("meta_speed_ord") if q_doc else None,
+            "candidate_meta_avg_rating":   h_doc.get("meta_avg_rating"),
+            "candidate_meta_solver_rating":h_doc.get("meta_solver_rating"),
+            "candidate_meta_estimated_time":h_doc.get("meta_estimated_time"),
+            "candidate_meta_speed_ord":    h_doc.get("meta_speed_ord"),
         }
         out.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -229,9 +260,8 @@ def export_labels():
         io.BytesIO(out_bytes),
         mimetype="application/x-ndjson",
         as_attachment=True,
-        download_name=f"labels_{query_id[:20]}_{int(time.time())}.jsonl",
+        download_name=f"labels_{(query_id or 'export')[:20]}_{int(time.time())}.jsonl",
     )
-
 
 # ---------------------------------------------------------------------------
 # Entry point

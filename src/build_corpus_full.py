@@ -19,7 +19,7 @@ Output corpus records contain five text fields:
 from pathlib import Path
 import json
 
-from encode   import encode_static, encode_pockets
+from encode   import encode_static, encode_pockets, encode_pawn_structure
 from encodev2 import encode_corpus_fields
 
 # ---------------------------------------------------------------------------
@@ -87,8 +87,11 @@ def main():
             pb = rec.get("pockets_black", {})
 
             static_toks = encode_static(board_fen)
+            pawn_toks   = encode_pawn_structure(board_fen)   # v2: pawn structure tokens
             pocket_toks = encode_pockets(pw, pb)
-            fields      = encode_corpus_fields(rec, static_toks, pocket_toks)
+            # Merge pawn structure into static tokens so text_static contains them
+            static_toks_full = static_toks + pawn_toks
+            fields      = encode_corpus_fields(rec, static_toks_full, pocket_toks)
 
             rec_out = {
                 "id":          rec.get("event_id") or (rec.get("site") + "_" + str(rec.get("ply"))),
@@ -99,6 +102,30 @@ def main():
                 "turn":        rec.get("turn", "white"),
                 "pockets_white": pw,
                 "pockets_black": pb,
+                # Metadata fields (section 4.3 of feature_descriptions_summary_2_.md)
+                # Engine-derived (always present):
+                #   meta_length    = PV length (solution length in half-moves) ~ MD "length"
+                #   meta_delta     = centipawn loss at the tactic (difficulty proxy)
+                #   meta_cp_before = engine eval before tactic
+                #   meta_mate_in   = forced mate depth (None = not a forced mate)
+                # Lichess-API-derived (present after running enrich_with_ratings.py):
+                #   meta_avg_rating      ~ MD "rating"      (average player Elo)
+                #   meta_solver_rating   ~ MD "rating"      (the solver's own Elo)
+                #   meta_estimated_time  ~ MD "popularity"  (time control seriousness proxy)
+                #   meta_white_rating, meta_black_rating
+                #   meta_clock_initial, meta_clock_inc, meta_speed
+                "meta_length":          len((rec.get("pv_before") or rec.get("pv_prev") or [])),
+                "meta_delta":           rec.get("delta"),
+                "meta_cp_before":       rec.get("cp_before"),
+                "meta_mate_in":         rec.get("mate_before"),
+                "meta_avg_rating":      rec.get("meta_avg_rating"),
+                "meta_solver_rating":   rec.get("meta_solver_rating"),
+                "meta_white_rating":    rec.get("meta_white_rating"),
+                "meta_black_rating":    rec.get("meta_black_rating"),
+                "meta_estimated_time":  rec.get("meta_estimated_time"),
+                "meta_clock_initial":   rec.get("meta_clock_initial"),
+                "meta_clock_inc":       rec.get("meta_clock_inc"),
+                "meta_speed":           rec.get("meta_speed"),
                 **fields,
             }
             out.write(json.dumps(rec_out, ensure_ascii=False) + "\n")

@@ -4,21 +4,31 @@ encodev2.py
 Dynamic token encoder for Crazyhouse tactical positions.
 
 v2 → v3 enrichments (mentor-informed, April 2026):
-  - Mating piece identity  (dyn:matingPiece:X) — which piece delivers checkmate
-  - Drop-mate variant      (dyn:mateDrop:X) — specifically a drop delivering mate
-  - Consecutive capture pairs (dyn:capPair:XY) — ordering of captures (Tier-3 importance per mentor)
+  - Mating piece identity  (dyn:mating_piece:X)
+  - Drop-mate variant      (dyn:mateDrop:X)
+  - Consecutive capture pairs (dyn:capPair:XY) — Tier-3 importance
   - Per-piece capture totals  (dyn:capPieceTotal:XN)
   - Sacrifice detection    (dyn:hasSacrifice, pv:sacrifice, pv:dropSacrifice)
   - Opponent-captures flag (dyn:oppCaptures / dyn:noOppCaptures)
   - Drop proximity to enemy king (dyn:dropNearKing / dyn:dropFarKing)
-  - sum:matingPiece:X in summary block
+  - sum:mating_piece:X in summary block
 
-Background: mentor's feature importance hierarchy (standard chess puzzles) shows:
-  Tier 1: checkmate agreement
-  Tier 2: move-sequence similarity
-  Tier 3: captured-piece agreement (queen, rook, knight)
+v3 → v4 enrichments (feature_descriptions_2_.md alignment, April 2026):
+  - Pawn promotion detection  (dyn:hasPromotion, pv:promotion, pv:promotionPiece:X)
+    → maps to DG_!F_p+ (Tier-4, CART Depth-2, permutation rank 3)
+  - Piece-moved tokens        (pv:pieceMoved:X) for every move
+    → maps to DS_!piece_moved_X (permutation rank 17)
+  - Attack-relation tokens    (pv:attack:X>Y) for new attacks per move
+    → maps to DS_!attack_X>Y (permutation rank 14)
+  - Mating piece PAIR tokens  (dyn:matingPiecePair:XY)
+    → maps to DG_!mating_piece_XY (LogReg top-10, e.g. double-bishop mate)
+  - NAMING FIX: matingPiece → mating_piece (underscore, matches MD column names)
+
+Feature importance tiers (from mentor .md files):
+  Tier 1: checkmate agreement         (dyn:hasMate → DG_!F_checkmate)
+  Tier 2: move-sequence similarity    (computed at pair-level in training)
+  Tier 3: captured-piece agreement    (dyn:capPair, dyn:capPieceTotal)
   Tier 4: promotion, sacrifice, mating-piece agreement
-The new tokens cover Tiers 3-4 and add Crazyhouse-specific variants.
 """
 
 import chess
@@ -26,12 +36,12 @@ import chess.variant
 from collections import Counter
 
 PIECE_LETTERS = {
-    chess.PAWN: "P",
+    chess.PAWN:   "P",
     chess.KNIGHT: "N",
     chess.BISHOP: "B",
-    chess.ROOK: "R",
-    chess.QUEEN: "Q",
-    chess.KING: "K",
+    chess.ROOK:   "R",
+    chess.QUEEN:  "Q",
+    chess.KING:   "K",
 }
 
 
@@ -114,17 +124,46 @@ def _reconstruct_event_board(rec: dict):
     raise ValueError("missing_startpos")
 
 
+def _get_new_attacks(board_before: chess.Board, board_after: chess.Board) -> list[str]:
+    """
+    Return pv:attack:X>Y tokens for attack relations that are NEW after a move
+    (present after but not before). Coordinate-independent: piece types only.
+
+    Matches the paper's DS_!attack_X>Y encoding (e.g. DS_!attack_Q>r).
+    Only attacker vs attacked colour combinations where attacker attacks attacked.
+    """
+    def _attack_pairs(b: chess.Board) -> set[tuple[str, str]]:
+        pairs = set()
+        for sq, piece in b.piece_map().items():
+            for att_sq in b.attackers(not piece.color, sq):
+                att_piece = b.piece_at(att_sq)
+                if att_piece:
+                    pairs.add((_piece_letter(att_piece.piece_type), _piece_letter(piece.piece_type)))
+        return pairs
+
+    before_pairs = _attack_pairs(board_before)
+    after_pairs  = _attack_pairs(board_after)
+    new_pairs    = after_pairs - before_pairs
+
+    return [f"pv:attack:{a}>{b}" for a, b in new_pairs]
+
+
 def encode_dynamic_v2(rec: dict) -> list[str]:
     """
     Dynamic tokens by replaying PV on CrazyhouseBoard starting from the event position.
 
-    Enriched in v3 with:
-      - Mating piece identity (dyn:matingPiece:X, dyn:mateDrop:X)
+    Full feature set (v4):
+      - Mating piece identity + pairs (dyn:mating_piece:X, dyn:matingPiecePair:XY)
+      - Drop-mate variant (dyn:mateDrop:X)
       - Consecutive capture pairs (dyn:capPair:XY)
       - Per-piece capture totals (dyn:capPieceTotal:XN)
-      - Sacrifice detection (dyn:hasSacrifice, pv:sacrifice, pv:dropSacrifice)
-      - Opponent-captures flag (dyn:oppCaptures)
-      - Drop proximity to enemy king (dyn:dropNearKing / dyn:dropFarKing)
+      - Sacrifice detection
+      - Opponent-captures flag
+      - Drop proximity to enemy king
+      - Pawn promotion (dyn:hasPromotion, pv:promotion, pv:promotionPiece:X) [NEW v4]
+      - Piece-moved tokens (pv:pieceMoved:X) [NEW v4]
+      - Attack-relation tokens (pv:attack:X>Y) [NEW v4]
+      - Mating piece pair tokens (dyn:matingPiecePair:XY) [NEW v4]
     """
     try:
         board = _reconstruct_event_board(rec)
@@ -142,17 +181,18 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
     tokens = []
 
     # ── Aggregate flags ──────────────────────────────────────────────────
-    has_drop = False
-    has_capture = False
-    has_check = False
-    has_mate = False
+    has_drop       = False
+    has_capture    = False
+    has_check      = False
+    has_mate       = False
     has_drop_check = False
-    has_sacrifice = False
-    opp_captures = False
+    has_sacrifice  = False
+    has_promotion  = False   # NEW v4
+    opp_captures   = False
 
-    drop_count = 0
-    cap_count = 0
-    move_count = 0
+    drop_count  = 0
+    cap_count   = 0
+    move_count  = 0
     drop_piece_set = set()
 
     pocket_gain  = {"P": 0, "N": 0, "B": 0, "R": 0, "Q": 0}
@@ -160,9 +200,10 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
 
     first_action = None
 
-    # For consecutive-capture pairs (mentor Tier-3)
+    # For consecutive-capture pairs (Tier-3)
     cap_sequence: list[str] = []
-    mating_piece: str | None = None
+    # For mating piece pairs (LogReg top-10, e.g. !mating_piece_bb)
+    mating_pieces: list[str] = []
 
     solver_color = board.turn   # color to move at the start of the PV
 
@@ -181,6 +222,7 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
 
         mover_is_solver = (board.turn == solver_color)
 
+        # ── Capture detection ────────────────────────────────────────────
         cap = board.is_capture(move)
         cap_piece = None
         if cap:
@@ -200,6 +242,7 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
             if cap_piece:
                 cap_sequence.append(cap_piece)
 
+        # ── Drop detection ───────────────────────────────────────────────
         is_drop = "@" in uci
         drop_piece = None
         if is_drop:
@@ -209,7 +252,7 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
             drop_piece_set.add(drop_piece)
             pocket_spend[drop_piece] = pocket_spend.get(drop_piece, 0) + 1
 
-        # Sacrifice detection: solver moves to a square attacked by opponent
+        # ── Sacrifice detection: solver moves to square attacked by opponent ──
         is_sacrifice = False
         if mover_is_solver:
             attacked_by_opp = board.is_attacked_by(not solver_color, move.to_square)
@@ -220,7 +263,7 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
                 is_sacrifice = True
                 has_sacrifice = True
 
-        # Drop proximity to enemy king
+        # ── Drop proximity to enemy king ─────────────────────────────────
         if is_drop and mover_is_solver:
             enemy_king_sq = board.king(not solver_color)
             if enemy_king_sq is not None:
@@ -230,13 +273,38 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
                 else:
                     tokens.append("dyn:dropFarKing")
 
+        # ── Piece-moved token (NEW v4) ───────────────────────────────────
+        # Records which piece type is moving — maps to DS_!piece_moved_X
+        if not is_drop:
+            moving_piece_obj = board.piece_at(move.from_square)
+            if moving_piece_obj:
+                tokens.append(f"pv:pieceMoved:{_piece_letter(moving_piece_obj.piece_type)}")
+        else:
+            tokens.append(f"pv:pieceMoved:{drop_piece}")
+
+        # ── Promotion detection (NEW v4) ─────────────────────────────────
+        # Maps to DG_!F_p+ (Tier-4, CART depth-2, permutation rank 3)
+        is_promotion = (move.promotion is not None)
+        promo_piece = None
+        if is_promotion:
+            has_promotion = True
+            promo_piece = _piece_letter(move.promotion)
+
+        # ── Save board state before push for attack diff ─────────────────
+        board_before_push = board.copy()
+
+        # ── Push the move ────────────────────────────────────────────────
         board.push(move)
         move_count += 1
+
+        # ── Attack-relation tokens (NEW v4) ──────────────────────────────
+        # Records new X>Y attacks arising after this move — maps to DS_!attack_X>Y
+        tokens.extend(_get_new_attacks(board_before_push, board))
 
         if cap and cap_piece and cap_piece != "K" and mover_is_solver:
             pocket_gain[cap_piece] = pocket_gain.get(cap_piece, 0) + 1
 
-        is_check = board.is_check()
+        is_check     = board.is_check()
         is_checkmate = board.is_checkmate()
 
         if is_check:
@@ -244,17 +312,18 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
         if is_checkmate:
             has_mate = True
 
-        # Mating piece identity
-        if is_checkmate and mating_piece is None:
+        # ── Mating piece identity (naming aligned to MD: mating_piece) ───
+        if is_checkmate:
             if is_drop and drop_piece:
-                mating_piece = drop_piece
-                tokens.append(f"dyn:matingPiece:{drop_piece}")
+                mating_pieces.append(drop_piece)
+                tokens.append(f"dyn:mating_piece:{drop_piece}")
                 tokens.append(f"dyn:mateDrop:{drop_piece}")
             else:
                 moved_piece = board.piece_at(move.to_square)
                 if moved_piece:
-                    mating_piece = _piece_letter(moved_piece.piece_type)
-                    tokens.append(f"dyn:matingPiece:{mating_piece}")
+                    mp = _piece_letter(moved_piece.piece_type)
+                    mating_pieces.append(mp)
+                    tokens.append(f"dyn:mating_piece:{mp}")
 
         if first_action is None:
             if is_drop and is_check:
@@ -270,7 +339,7 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
             elif is_check:
                 first_action = "check"
 
-        # Per-move tokens
+        # ── Per-move tokens ──────────────────────────────────────────────
         if is_drop and drop_piece:
             tokens.append("pv:drop")
             tokens.append(f"pv:dropPiece:{drop_piece}")
@@ -295,21 +364,33 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
             if moved_piece:
                 tokens.append(f"pv:sacrificePiece:{_piece_letter(moved_piece.piece_type)}")
 
+        # ── Promotion per-move tokens (NEW v4) ───────────────────────────
+        if is_promotion and promo_piece:
+            tokens.append("pv:promotion")
+            tokens.append(f"pv:promotionPiece:{promo_piece}")
+
         if is_checkmate:
             tokens.append("pv:mate")
             break
 
-    # Consecutive capture-pair tokens (mentor Tier-3: ordering of captures)
+    # ── Consecutive capture-pair tokens (Tier-3: ordering of captures) ───
     for i in range(len(cap_sequence) - 1):
         pair = cap_sequence[i] + cap_sequence[i + 1]
         tokens.append(f"dyn:capPair:{pair}")
 
-    # Per-piece capture counts
+    # ── Per-piece capture counts ─────────────────────────────────────────
     for piece, cnt in Counter(cap_sequence).items():
         tokens.append(f"dyn:capPieceTotal:{piece}{cnt}")
 
+    # ── Mating piece PAIR tokens (NEW v4) ────────────────────────────────
+    # e.g. dyn:matingPiecePair:bb = two bishops cooperate in checkmate
+    # maps to DG_!mating_piece_XY (LogReg top-10 rank 9)
+    for i in range(len(mating_pieces) - 1):
+        pair = mating_pieces[i] + mating_pieces[i + 1]
+        tokens.append(f"dyn:matingPiecePair:{pair}")
+
     # ── Summary flags ────────────────────────────────────────────────────
-    tokens.append("dyn:hasDrop" if has_drop else "dyn:noDrop")
+    tokens.append("dyn:hasDrop"    if has_drop    else "dyn:noDrop")
     tokens.append("dyn:hasCapture" if has_capture else "dyn:noCapture")
     if has_drop_check:
         tokens.append("dyn:hasDropCheck")
@@ -319,6 +400,8 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
         tokens.append("dyn:hasMate")
     if has_sacrifice:
         tokens.append("dyn:hasSacrifice")
+    if has_promotion:                        # NEW v4
+        tokens.append("dyn:hasPromotion")
     if opp_captures:
         tokens.append("dyn:oppCaptures")
     else:
@@ -357,12 +440,14 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
         tokens.append("sum:hasMate")
     if has_sacrifice:
         tokens.append("sum:hasSacrifice")
+    if has_promotion:                        # NEW v4
+        tokens.append("sum:hasPromotion")
     if opp_captures:
         tokens.append("sum:oppCaptures")
     if first_action:
         tokens.append(f"sum:first:{first_action}")
-    if mating_piece:
-        tokens.append(f"sum:matingPiece:{mating_piece}")
+    for mp in mating_pieces:
+        tokens.append(f"sum:mating_piece:{mp}")   # FIXED: underscore naming
 
     for p, c in pocket_gain.items():
         if c:

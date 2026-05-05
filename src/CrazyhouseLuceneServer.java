@@ -160,6 +160,11 @@ public class CrazyhouseLuceneServer {
         String textDynSol  = jsonStr(line, "text_dynamic_solution");
         int    ply         = jsonInt(line, "ply");
         int    mate        = jsonInt(line, "mate_before");
+        // Metadata fields (feature_descriptions_summary_2_.md section 4.3)
+        int    metaLength  = jsonInt(line,    "meta_length");
+        double metaDelta   = jsonDouble(line, "meta_delta");
+        double metaCp      = jsonDouble(line, "meta_cp_before");
+        int    metaMateIn  = jsonInt(line,    "meta_mate_in");
 
         Document doc = new Document();
 
@@ -175,6 +180,11 @@ public class CrazyhouseLuceneServer {
         doc.add(new StoredField("ply",          ply));
         doc.add(new IntPoint(   "mate_before",  mate));
         doc.add(new StoredField("mate_before",  mate));
+        // Metadata stored fields — returned by /search and /doc endpoints
+        doc.add(new StoredField("meta_length",   metaLength));
+        doc.add(new StoredField("meta_delta",    metaDelta));
+        doc.add(new StoredField("meta_cp_before",metaCp));
+        doc.add(new StoredField("meta_mate_in",  metaMateIn));
 
         // Full-text search fields (not stored to save space)
         doc.add(new TextField("text_all",              textAll     != null ? textAll     : "", Field.Store.NO));
@@ -287,18 +297,24 @@ public class CrazyhouseLuceneServer {
             "\"site\":%s,\"ply\":%s,\"mate_before\":%s," +
             "\"board_fen\":%s,\"turn\":%s," +
             "\"pockets_white\":%s,\"pockets_black\":%s," +
-            "\"text_dynamic\":%s}",
+            "\"text_dynamic\":%s," +
+            "\"meta_length\":%s,\"meta_delta\":%s," +
+            "\"meta_cp_before\":%s,\"meta_mate_in\":%s}",
             jsonQuote(doc.get("id")),
             rank,
             score,
             jsonQuote(doc.get("site")),
-            doc.get("ply") != null ? doc.get("ply") : "0",
+            doc.get("ply")         != null ? doc.get("ply")         : "0",
             doc.get("mate_before") != null ? doc.get("mate_before") : "null",
             jsonQuote(doc.get("board_fen")),
             jsonQuote(doc.get("turn")),
             rawOrEmpty(doc.get("pockets_white")),
             rawOrEmpty(doc.get("pockets_black")),
-            jsonQuote(doc.get("text_dynamic"))
+            jsonQuote(doc.get("text_dynamic")),
+            doc.get("meta_length")    != null ? doc.get("meta_length")    : "0",
+            doc.get("meta_delta")     != null ? doc.get("meta_delta")     : "0",
+            doc.get("meta_cp_before") != null ? doc.get("meta_cp_before") : "0",
+            doc.get("meta_mate_in")   != null ? doc.get("meta_mate_in")   : "0"
         );
     }
 
@@ -405,6 +421,26 @@ public class CrazyhouseLuceneServer {
         }
         try { return Integer.parseInt(sb.toString()); }
         catch (NumberFormatException e) { return 0; }
+    }
+
+    /** Extract a JSON double/float value. Returns 0.0 if key not found or value is null. */
+    static double jsonDouble(String json, String key) {
+        String search = "\"" + key + "\":";
+        int start = json.indexOf(search);
+        if (start < 0) return 0.0;
+        start += search.length();
+        while (start < json.length() && json.charAt(start) == ' ') start++;
+        if (start >= json.length()) return 0.0;
+        char first = json.charAt(start);
+        if (first == 'n') return 0.0; // null
+        StringBuilder sb = new StringBuilder();
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (Character.isDigit(c) || c == '-' || c == '.' || c == 'e' || c == 'E' || c == '+') sb.append(c);
+            else break;
+        }
+        try { return Double.parseDouble(sb.toString()); }
+        catch (NumberFormatException e) { return 0.0; }
     }
 
     /** Extract a JSON object value {"key":{...}} as raw string including braces. */
