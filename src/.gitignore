@@ -1,1 +1,14 @@
-data/
+# Large data files
+data/derived/*.jsonl
+data/derived/*.parquet
+data/derived/*.npy
+data/derived/lucene_index/
+data/db/
+
+# Model outputs
+data/models/
+
+# Python cache
+__pycache__/
+*.pyc
+*.class

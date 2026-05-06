@@ -30,7 +30,8 @@ import java.util.concurrent.Executors;
  *   GET /search?q=<tokens>&topk=10&field=text_all&exclude_id=<id>
  *       Returns JSON array of hits: [{id, score, site, ply, board_fen,
  *                                     pockets_white, pockets_black,
- *                                     mate_before, turn, text_dynamic}, ...]
+ *                                     mate_before, turn, text_dynamic,
+ *                                     text_static}, ...]
  *
  *   GET /doc?id=<doc_id>
  *       Returns JSON object for a single document by id.
@@ -169,28 +170,29 @@ public class CrazyhouseLuceneServer {
         Document doc = new Document();
 
         // Stored + indexed fields
-        doc.add(new StringField("id",           id,                       Field.Store.YES));
-        doc.add(new StoredField("site",         site        != null ? site        : ""));
-        doc.add(new StoredField("board_fen",    boardFen    != null ? boardFen    : ""));
-        doc.add(new StoredField("turn",         turn        != null ? turn        : "white"));
-        doc.add(new StoredField("pockets_white",pwJson      != null ? pwJson      : "{}"));
-        doc.add(new StoredField("pockets_black",pbJson      != null ? pbJson      : "{}"));
-        doc.add(new StoredField("text_dynamic", textDynamic != null ? textDynamic : ""));
-        doc.add(new IntPoint(   "ply",          ply));
-        doc.add(new StoredField("ply",          ply));
-        doc.add(new IntPoint(   "mate_before",  mate));
-        doc.add(new StoredField("mate_before",  mate));
+        doc.add(new StringField("id",            id,                       Field.Store.YES));
+        doc.add(new StoredField("site",          site        != null ? site        : ""));
+        doc.add(new StoredField("board_fen",     boardFen    != null ? boardFen    : ""));
+        doc.add(new StoredField("turn",          turn        != null ? turn        : "white"));
+        doc.add(new StoredField("pockets_white", pwJson      != null ? pwJson      : "{}"));
+        doc.add(new StoredField("pockets_black", pbJson      != null ? pbJson      : "{}"));
+        doc.add(new StoredField("text_dynamic",  textDynamic != null ? textDynamic : ""));
+        doc.add(new StoredField("text_static",   textStatic  != null ? textStatic  : ""));  // FIX: now stored
+        doc.add(new IntPoint(   "ply",           ply));
+        doc.add(new StoredField("ply",           ply));
+        doc.add(new IntPoint(   "mate_before",   mate));
+        doc.add(new StoredField("mate_before",   mate));
         // Metadata stored fields — returned by /search and /doc endpoints
-        doc.add(new StoredField("meta_length",   metaLength));
-        doc.add(new StoredField("meta_delta",    metaDelta));
-        doc.add(new StoredField("meta_cp_before",metaCp));
-        doc.add(new StoredField("meta_mate_in",  metaMateIn));
+        doc.add(new StoredField("meta_length",    metaLength));
+        doc.add(new StoredField("meta_delta",     metaDelta));
+        doc.add(new StoredField("meta_cp_before", metaCp));
+        doc.add(new StoredField("meta_mate_in",   metaMateIn));
 
-        // Full-text search fields (not stored to save space)
-        doc.add(new TextField("text_all",              textAll     != null ? textAll     : "", Field.Store.NO));
-        doc.add(new TextField("text_static",           textStatic  != null ? textStatic  : "", Field.Store.NO));
-        doc.add(new TextField("text_dynamic_general",  textDynGen  != null ? textDynGen  : "", Field.Store.NO));
-        doc.add(new TextField("text_dynamic_solution", textDynSol  != null ? textDynSol  : "", Field.Store.NO));
+        // Full-text search fields (not stored — text_static stored separately above)
+        doc.add(new TextField("text_all",              textAll    != null ? textAll    : "", Field.Store.NO));
+        doc.add(new TextField("text_static",           textStatic != null ? textStatic : "", Field.Store.NO));
+        doc.add(new TextField("text_dynamic_general",  textDynGen != null ? textDynGen : "", Field.Store.NO));
+        doc.add(new TextField("text_dynamic_solution", textDynSol != null ? textDynSol : "", Field.Store.NO));
 
         return doc;
     }
@@ -297,7 +299,7 @@ public class CrazyhouseLuceneServer {
             "\"site\":%s,\"ply\":%s,\"mate_before\":%s," +
             "\"board_fen\":%s,\"turn\":%s," +
             "\"pockets_white\":%s,\"pockets_black\":%s," +
-            "\"text_dynamic\":%s," +
+            "\"text_dynamic\":%s,\"text_static\":%s," +
             "\"meta_length\":%s,\"meta_delta\":%s," +
             "\"meta_cp_before\":%s,\"meta_mate_in\":%s}",
             jsonQuote(doc.get("id")),
@@ -311,6 +313,7 @@ public class CrazyhouseLuceneServer {
             rawOrEmpty(doc.get("pockets_white")),
             rawOrEmpty(doc.get("pockets_black")),
             jsonQuote(doc.get("text_dynamic")),
+            jsonQuote(doc.get("text_static")),
             doc.get("meta_length")    != null ? doc.get("meta_length")    : "0",
             doc.get("meta_delta")     != null ? doc.get("meta_delta")     : "0",
             doc.get("meta_cp_before") != null ? doc.get("meta_cp_before") : "0",
