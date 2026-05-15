@@ -24,6 +24,7 @@ from encode import encode_static, encode_pockets
 # ---------------------------------------------------------------------------
 BASE_DIR   = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+ASSETS_DIR = BASE_DIR.parent / "assets"
 LUCENE_URL = "http://localhost:8983"
 
 # ---------------------------------------------------------------------------
@@ -83,37 +84,87 @@ def _base_game_id(doc_id: str) -> str:
     return idx[0] if len(idx) > 1 else doc_id
 
 
+def _parse_pocket(p):
+    """Ensure pocket is a dict, not a string."""
+    if isinstance(p, dict):
+        return p
+    if isinstance(p, str):
+        try:
+            return json.loads(p)
+        except Exception:
+            return {}
+    return {}
+
+
+def _parse_arr(v):
+    """Ensure solution_uci/san is a list, not a string."""
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except Exception:
+            return []
+    return []
+
+
 def _format_hit(h: dict, rank: int) -> dict:
     site = h.get("site") or ""
     ply  = h.get("ply") or 0
+
     lichess_url = ""
     if site and "lichess.org" in site:
-        lichess_url = f"https://lichess.org/{site.split('/')[-1]}#{ply}"
-    pw = h.get("pockets_white", {})
-    pb = h.get("pockets_black", {})
-    if isinstance(pw, str):
-        try: pw = json.loads(pw)
-        except: pw = {}
-    if isinstance(pb, str):
-        try: pb = json.loads(pb)
-        except: pb = {}
+        game_id = site.split("/")[-1]
+        lichess_url = f"https://lichess.org/{game_id}#{ply}"
+
+    pw = _parse_pocket(h.get("pockets_white", {}))
+    pb = _parse_pocket(h.get("pockets_black", {}))
+
+    solution_san = _parse_arr(h.get("solution_san", []))
+    solution_uci = _parse_arr(h.get("solution_uci", []))
+
+    # mate_in from new data; fall back to mate_before for old data
+    mate_in = h.get("mate_in") or h.get("mate_before")
+
     return {
-        "id":            h.get("id", ""),
-        "rank":          rank,
-        "score":         round(float(h.get("score", 0)), 3),
-        "site":          site,
-        "ply":           ply,
-        "lichess_url":   lichess_url,
-        "board_fen":     h.get("board_fen", ""),
-        "pockets_white": pw,
-        "pockets_black": pb,
-        "mate_before":   h.get("mate_before"),
-        "turn":          h.get("turn", "white"),
-        "delta":         None,
-        "bestmove":      None,
-        "pv":            [],
-        "played_move":   None,
+        "id":               h.get("id", ""),
+        "rank":             rank,
+        "score":            round(float(h.get("score", 0)), 3),
+        "site":             site,
+        "ply":              ply,
+        "lichess_url":      lichess_url,
+        "board_fen":        h.get("board_fen", ""),
+        "fen":              h.get("fen", ""),
+        "pockets_white":    pw,
+        "pockets_black":    pb,
+        "turn":             h.get("turn", "white"),
+
+        # Puzzle
+        "mate_in":          mate_in,
+        "mate_before":      mate_in,   # backwards compat
+        "solution_san":     solution_san,
+        "solution_uci":     solution_uci,
+        "engine_verified":  h.get("engine_verified", False),
+
+        # Game metadata
+        "white":            h.get("white"),
+        "black":            h.get("black"),
+        "white_elo":        h.get("white_elo"),
+        "black_elo":        h.get("black_elo"),
+        "game_rating_avg":  h.get("game_rating_avg") or h.get("meta_avg_rating"),
+        "time_control":     h.get("time_control"),
+        "utc_date":         h.get("utc_date"),
+        "result":           h.get("result"),
+        "source_pgn":       h.get("source_pgn"),
+        "event":            h.get("event"),
+
+        # Legacy fields (kept for export compatibility)
+        "delta":            None,
+        "bestmove":         solution_san[0] if solution_san else None,
+        "pv":               solution_san,
+        "played_move":      None,
     }
+
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -122,6 +173,11 @@ def _format_hit(h: dict, rank: int) -> dict:
 @app.route("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.route("/assets/<path:filename>")
+def assets(filename):
+    return send_from_directory(ASSETS_DIR, filename)
 
 
 @app.route("/api/queries")
@@ -196,13 +252,11 @@ def search_by_fen():
 def export_labels():
     data = request.get_json()
 
-    # ── Accept both calling conventions ─────────────────────────────────────
-    # Frontend sends:  { ids: [queryId, hit1, hit2, ...] }
     if "ids" in data:
         ids         = data["ids"]
         query_id    = ids[0] if ids else ""
         all_hit_ids = ids[1:]
-        similar_ids = set(all_hit_ids)   # all exported hits are "similar"
+        similar_ids = set(all_hit_ids)
         query_fen   = data.get("query_fen", "")
     else:
         query_id    = data.get("query_id", "")
@@ -225,33 +279,21 @@ def export_labels():
             "bm25_rank":              rank,
             "query_fen":              (q_doc.get("board_fen") if q_doc else "") or query_fen,
             "candidate_fen":          h_doc.get("board_fen", ""),
-            "query_mate":             q_doc.get("mate_before") if q_doc else None,
-            "candidate_mate":         h_doc.get("mate_before"),
+            "query_mate":             q_doc.get("mate_in") if q_doc else None,
+            "candidate_mate":         h_doc.get("mate_in"),
             "query_turn":             q_doc.get("turn", "") if q_doc else "",
             "candidate_turn":         h_doc.get("turn", ""),
+            "query_solution_san":     _parse_arr(q_doc.get("solution_san")) if q_doc else [],
+            "candidate_solution_san": _parse_arr(h_doc.get("solution_san")),
             "query_text_static":      q_doc.get("text_static", "") if q_doc else "",
             "candidate_text_static":  h_doc.get("text_static", ""),
             "query_text_dynamic":     q_doc.get("text_dynamic", "") if q_doc else "",
             "candidate_text_dynamic": h_doc.get("text_dynamic", ""),
-            # Metadata fields — used by train_similarity.py as meta_ features
-            # Engine-derived
-            "query_meta_length":           q_doc.get("meta_length") if q_doc else None,
-            "query_meta_delta":            q_doc.get("meta_delta") if q_doc else None,
-            "query_meta_cp_before":        q_doc.get("meta_cp_before") if q_doc else None,
-            "query_meta_mate_in":          q_doc.get("meta_mate_in") if q_doc else None,
-            "candidate_meta_length":       h_doc.get("meta_length"),
-            "candidate_meta_delta":        h_doc.get("meta_delta"),
-            "candidate_meta_cp_before":    h_doc.get("meta_cp_before"),
-            "candidate_meta_mate_in":      h_doc.get("meta_mate_in"),
-            # Lichess-API-derived (present after enrich_with_ratings.py)
-            "query_meta_avg_rating":       q_doc.get("meta_avg_rating") if q_doc else None,
-            "query_meta_solver_rating":    q_doc.get("meta_solver_rating") if q_doc else None,
-            "query_meta_estimated_time":   q_doc.get("meta_estimated_time") if q_doc else None,
-            "query_meta_speed_ord":        q_doc.get("meta_speed_ord") if q_doc else None,
-            "candidate_meta_avg_rating":   h_doc.get("meta_avg_rating"),
-            "candidate_meta_solver_rating":h_doc.get("meta_solver_rating"),
-            "candidate_meta_estimated_time":h_doc.get("meta_estimated_time"),
-            "candidate_meta_speed_ord":    h_doc.get("meta_speed_ord"),
+            # Game metadata
+            "query_site":             q_doc.get("site") if q_doc else "",
+            "candidate_site":         h_doc.get("site", ""),
+            "query_rating_avg":       q_doc.get("game_rating_avg") if q_doc else None,
+            "candidate_rating_avg":   h_doc.get("game_rating_avg"),
         }
         out.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -260,8 +302,9 @@ def export_labels():
         io.BytesIO(out_bytes),
         mimetype="application/x-ndjson",
         as_attachment=True,
-        download_name=f"labels_{(query_id or 'export')[:20]}_{int(time.time())}.jsonl",
+        download_name=f"ch_export_{(query_id or 'export')[:20]}_{int(time.time())}.jsonl",
     )
+
 
 # ---------------------------------------------------------------------------
 # Entry point

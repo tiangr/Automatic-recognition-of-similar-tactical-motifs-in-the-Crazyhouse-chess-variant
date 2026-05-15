@@ -9,19 +9,18 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0d0e12;--surface:#14161c;--surface2:#1b1e27;--surface3:#222532;
-  --border:#2a2d3e;--accent:#e8c96d;--accent2:#6db4e8;--accent-green:#6de8a0;
-  --text:#e1e3ee;--text-dim:#767b96;--text-dimmer:#42465c;
-  --sq:48px;--sq-sm:22px;
+  --bg:#f5f2ed;--surface:#ffffff;--surface2:#f0ece4;--surface3:#e6e0d6;
+  --border:#d4cdc0;--accent:#b5451b;--accent2:#2563a8;--accent-green:#1e7e3e;
+  --text:#1c1917;--text-dim:#57534e;--text-dimmer:#a8a29e;
+  --sq:48px;--sq-sm:18px;
   --mono:'Space Mono',monospace;--sans:'Sora',sans-serif;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;overflow:hidden}
 .app{display:grid;grid-template-columns:410px 1fr;grid-template-rows:50px 1fr;height:100vh}
 
-header{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--border)}
+header{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.06)}
 header h1{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent);letter-spacing:.06em}
 header h1 span{color:var(--text-dim);font-weight:400}
-#corpus-info{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--text-dimmer)}
 
 .left-panel{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--surface3) transparent}
 .board-section{padding:12px 12px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;border-bottom:1px solid var(--border)}
@@ -29,85 +28,83 @@ header h1 span{color:var(--text-dim);font-weight:400}
 
 .pocket-strip{display:flex;align-items:center;gap:3px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;min-height:30px;width:calc(var(--sq)*8 + 4px)}
 .plbl{font-family:var(--mono);font-size:9px;color:var(--text-dimmer);margin-right:4px;font-weight:700}
-.pp{width:24px;height:24px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:17px;line-height:1;border:1px solid var(--border);position:relative;cursor:pointer;transition:transform .1s,box-shadow .1s}
-.pp:hover{transform:scale(1.15);box-shadow:0 2px 8px rgba(0,0,0,.5)}
-.pp.pw{background:#2e2810;border-color:#4d421a}
-.pp.pb{background:#12182b;border-color:#1f2e4d}
+.pp{width:28px;height:28px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);position:relative;cursor:pointer;transition:transform .1s,box-shadow .1s;background:var(--surface3)}
+.pp:hover{transform:scale(1.15);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.pp.pw{background:#fdf6e3;border-color:#ddd0a8}.pp.pb{background:#e8eef7;border-color:#b0c2d8}
 .pp.pocket-sel{box-shadow:0 0 0 2px var(--accent) !important;transform:scale(1.15)}
-.pp-count{position:absolute;bottom:-3px;right:-3px;font-family:var(--mono);font-size:8px;font-weight:700;background:var(--surface3);color:var(--accent);border-radius:3px;padding:0 2px;line-height:12px;pointer-events:none}
+.pp-count{position:absolute;bottom:-3px;right:-3px;font-family:var(--mono);font-size:8px;font-weight:700;background:var(--accent);color:#fff;border-radius:3px;padding:0 2px;line-height:12px;pointer-events:none}
 .empty-pocket{font-family:var(--mono);font-size:9px;color:var(--text-dimmer);font-style:italic}
 
-#iboard{position:relative;width:calc(var(--sq)*8);height:calc(var(--sq)*8);border:2px solid var(--border);border-radius:4px;overflow:hidden;flex-shrink:0;user-select:none}
+#iboard{position:relative;width:calc(var(--sq)*8);height:calc(var(--sq)*8);border:2px solid var(--border);border-radius:4px;overflow:hidden;flex-shrink:0;user-select:none;box-shadow:0 2px 12px rgba(0,0,0,.10)}
 .sq{position:absolute;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .sq.light{background:#f0d9b5}.sq.dark{background:#b58863}
 .sq.selected{background:#f6f669 !important}
-.sq.legal-dot::after{content:'';position:absolute;width:28%;height:28%;border-radius:50%;background:rgba(0,0,0,0.2);pointer-events:none}
-.sq.legal-cap{box-shadow:inset 0 0 0 4px rgba(0,0,0,0.25)}
-.sq:hover{filter:brightness(1.06)}
-.piece{pointer-events:none;line-height:1}
-.piece.white{color:#fff;text-shadow:0 0 3px rgba(0,0,0,.9),0 1px 2px rgba(0,0,0,.7)}
-.piece.black{color:#111;text-shadow:0 0 2px rgba(255,255,255,.2)}
-.coord{position:absolute;font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(0,0,0,0.28);pointer-events:none;line-height:1}
-.coord.rank{right:2px;top:2px}.coord.file{left:2px;bottom:2px}.coord.on-dark{color:rgba(255,255,255,0.28)}
+.sq.legal-dot::after{content:'';position:absolute;width:28%;height:28%;border-radius:50%;background:rgba(0,0,0,0.18);pointer-events:none}
+.sq.legal-cap{box-shadow:inset 0 0 0 4px rgba(0,0,0,0.22)}
+.sq.drag-over-sq{outline:3px inset rgba(181,69,27,.5);outline-offset:-3px}
+.piece-img{pointer-events:none;width:90%;height:90%;object-fit:contain;display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+#drag-ghost{position:fixed;pointer-events:none;z-index:9999;display:none;width:56px;height:56px;transform:translate(-50%,-50%);filter:drop-shadow(0 6px 16px rgba(0,0,0,.40))}
+#drag-ghost img{width:100%;height:100%;object-fit:contain}
+.coord{position:absolute;font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(0,0,0,0.30);pointer-events:none;line-height:1}
+.coord.rank{right:2px;top:2px}.coord.file{left:2px;bottom:2px}.coord.on-dark{color:rgba(255,255,255,0.35)}
 
 .info-section{padding:10px 12px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--border)}
 .row-label{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);margin-bottom:3px}
 .fen-row{display:flex;gap:5px}
 input.fen-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);padding:6px 9px;font-size:10px;outline:none;transition:border-color .15s}
 input.fen-input:focus{border-color:var(--accent)}
-.btn-sm{font-family:var(--mono);font-size:10px;font-weight:700;padding:6px 11px;border-radius:6px;cursor:pointer;border:none;background:var(--accent);color:#0d0e12;white-space:nowrap;transition:filter .12s}
+.btn-sm{font-family:var(--mono);font-size:10px;font-weight:700;padding:6px 11px;border-radius:6px;cursor:pointer;border:none;background:var(--accent);color:#fff;white-space:nowrap;transition:filter .12s}
 .btn-sm:hover{filter:brightness(1.1)}
 .btn-sm.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}
 .btn-sm.ghost:hover{color:var(--text);border-color:var(--text)}
 
-/* Solution box */
 .solution-display{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:var(--mono);font-size:10px;color:var(--text);line-height:1.9;min-height:30px;white-space:normal;overflow-wrap:break-word}
 .sol-move{display:inline-block;margin:1px 2px;padding:1px 5px;border-radius:3px;background:var(--surface3);color:var(--text);cursor:pointer;transition:background .1s}
 .sol-move:hover{background:var(--border)}
-.sol-move.current{background:var(--accent);color:#0d0e12;font-weight:700}
+.sol-move.current{background:var(--accent);color:#fff;font-weight:700}
 .sol-move.played{color:var(--text-dim)}
 
-/* Nav buttons */
 .nav-row{display:flex;gap:5px;align-items:center}
 .nav-btn{font-family:var(--mono);font-size:13px;font-weight:700;width:36px;height:30px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);transition:all .1s;display:flex;align-items:center;justify-content:center}
 .nav-btn:hover{border-color:var(--accent);color:var(--accent)}
 .nav-btn:disabled{opacity:.3;cursor:not-allowed}
 .nav-status{font-family:var(--mono);font-size:9px;color:var(--text-dimmer);margin-left:4px}
 
-.search-section{padding:10px 12px}
-.btn-search{width:100%;font-family:var(--mono);font-size:12px;font-weight:700;padding:10px;border-radius:8px;cursor:pointer;border:none;background:var(--accent);color:#0d0e12;transition:filter .12s;letter-spacing:.04em}
+.search-section{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.btn-search{width:100%;font-family:var(--mono);font-size:12px;font-weight:700;padding:10px;border-radius:8px;cursor:pointer;border:none;background:var(--accent);color:#fff;transition:filter .12s;letter-spacing:.04em}
 .btn-search:hover{filter:brightness(1.08)}
+.btn-export{width:100%;font-family:var(--mono);font-size:11px;font-weight:700;padding:8px;border-radius:8px;cursor:pointer;border:1.5px solid var(--accent);background:transparent;color:var(--accent);transition:all .12s;letter-spacing:.03em}
+.btn-export:hover{background:var(--accent);color:#fff}
 
 main{display:flex;flex-direction:column;overflow:hidden}
-.tb{display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
-.tbs{display:flex;align-items:center;gap:6px;padding:7px 14px;border-right:1px solid var(--border)}
-.tbs:last-child{border-right:none;margin-left:auto;gap:8px}
-.tlbl{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dimmer)}
-.fb{font-family:var(--mono);font-size:10px;font-weight:700;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;transition:all .1s}
-.fb:hover{border-color:var(--accent);color:var(--accent)}.fb.active{background:var(--accent);color:#0d0e12;border-color:var(--accent)}
-.si{font-family:var(--mono);font-size:11px;color:var(--text-dim)}.si b{color:var(--accent)}
-.btn{font-family:var(--mono);font-size:11px;font-weight:700;padding:5px 14px;border-radius:6px;cursor:pointer;border:none;transition:all .14s}
-.btn-p{background:var(--accent);color:#0d0e12}.btn-p:hover{filter:brightness(1.1)}.btn-p:disabled{opacity:.3;cursor:not-allowed}
-.btn-g{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.btn-g:hover{border-color:var(--text);color:var(--text)}
-.ha{flex:1;overflow-y:auto;padding:14px 16px;scrollbar-width:thin;scrollbar-color:var(--surface3) transparent}
-.hg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.hc{background:var(--surface);border:1px solid var(--border);border-radius:13px;overflow:hidden;cursor:pointer;position:relative;transition:border-color .12s,transform .12s,box-shadow .12s}
-.hc:hover{border-color:var(--text-dimmer);transform:translateY(-1px);box-shadow:0 4px 18px rgba(0,0,0,.5)}
+.ha{flex:1;overflow-y:auto;padding:8px 12px;scrollbar-width:thin;scrollbar-color:var(--surface3) transparent}
+.hg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+
+/* Hit card */
+.hc{background:var(--surface);border:1.5px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer;position:relative;transition:border-color .12s,transform .12s,box-shadow .12s}
+.hc:hover{border-color:var(--text-dimmer);transform:translateY(-1px);box-shadow:0 4px 18px rgba(0,0,0,.10)}
 .hc.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .chk{position:absolute;top:8px;right:8px;width:18px;height:18px;border-radius:50%;border:2px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:10px;z-index:3;transition:all .12s}
-.hc.sel .chk{background:var(--accent);border-color:var(--accent);color:#0d0e12}
-.hi2{display:flex}.hcb{padding:8px;flex-shrink:0;display:flex;flex-direction:column;gap:3px;align-items:center}
-.hci{flex:1;padding:8px 10px 8px 2px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.hc.sel .chk{background:var(--accent);border-color:var(--accent);color:#fff}
+.hi2{display:flex;align-items:stretch}
+.hcb{padding:4px 3px 4px 5px;flex-shrink:0;display:flex;flex-direction:row;gap:2px;align-items:center}
+.pocket-side{display:flex;flex-direction:column;gap:1px;justify-content:center;width:14px}
+.pocket-side-top{justify-content:flex-start}.pocket-side-bot{justify-content:flex-end}
+.mpp-img{width:13px;height:13px;object-fit:contain;display:block}
+.hci{flex:1;padding:4px 8px 4px 3px;display:flex;flex-direction:column;gap:2px;min-width:0;justify-content:center}
 .hrk{font-family:var(--mono);font-size:9px;color:var(--text-dimmer);text-transform:uppercase;letter-spacing:.05em}
 .hsc{color:var(--accent);font-weight:700;font-size:12px}
-.hm{display:flex;gap:4px;flex-wrap:wrap}
+.hm{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
 .badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--surface3);color:var(--text-dim)}
-.badge.mate{background:#2a1d08;color:var(--accent)}.badge.delta{background:#08172a;color:var(--accent2)}.badge.drop{background:#0b1f0e;color:var(--accent-green)}
-.hsol{font-family:var(--mono);font-size:9px;color:var(--accent2);white-space:normal;line-height:1.6;word-break:break-all}
-.hsol .bm{color:var(--accent);font-weight:700}
-.hlk{font-family:var(--mono);font-size:9px;color:var(--accent2);text-decoration:none;display:inline-block;margin-top:1px}.hlk:hover{text-decoration:underline}
-.mini-pocket{display:flex;gap:1px;flex-wrap:wrap;min-height:12px;align-items:center;width:calc(var(--sq-sm)*8)}
-.mpp{font-size:12px;line-height:1}
+.badge.mate{background:#fdf0e8;color:var(--accent);border:1px solid #f0d0b8}
+.badge.drop{background:#e8f5ec;color:var(--accent-green);border:1px solid #b8e0c4}
+.badge.verified{background:#e8f0fa;color:var(--accent2);border:1px solid #c0d4f0}
+.hrow{display:flex;align-items:baseline;gap:4px;min-width:0;line-height:1.35}
+.hrow-lbl{font-family:var(--mono);font-size:8px;font-weight:700;color:var(--text-dimmer);text-transform:uppercase;letter-spacing:.06em;flex-shrink:0;width:46px}
+.hrow-val{font-family:var(--mono);font-size:9px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hrow-val.sol{color:var(--accent2);white-space:normal;line-height:1.5;word-break:break-word}
+.hrow-val.sol .bm{color:var(--accent);font-weight:700}
+.hrow-val a{color:var(--accent2);text-decoration:none}.hrow-val a:hover{text-decoration:underline}
 canvas{display:block;image-rendering:pixelated}
 .ph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:100%;color:var(--text-dimmer);font-family:var(--mono);font-size:12px;text-align:center}
 .ico{font-size:34px;opacity:.22}
@@ -119,7 +116,6 @@ canvas{display:block;image-rendering:pixelated}
 <div class="app">
   <header>
     <h1>♟ Crazyhouse <span>· Tactical Retrieval</span></h1>
-    <span id="corpus-info">Loading…</span>
   </header>
   <aside class="left-panel">
     <div class="board-section">
@@ -129,173 +125,110 @@ canvas{display:block;image-rendering:pixelated}
       <div class="pocket-strip" id="pocket-white"></div>
     </div>
     <div class="info-section">
-      <!-- FEN -->
       <div>
         <div class="row-label">FEN</div>
         <div class="fen-row">
-          <input class="fen-input" id="fen-input" type="text" placeholder="Paste FEN (standard or crazyhouse)…" spellcheck="false"/>
+          <input class="fen-input" id="fen-input" type="text" placeholder="Paste FEN…" spellcheck="false"/>
           <button class="btn-sm" onclick="loadFen()">Load</button>
           <button class="btn-sm ghost" onclick="resetBoard()">Reset</button>
         </div>
       </div>
-      <!-- Move list + Navigation -->
       <div id="solution-section">
         <div class="row-label">Moves</div>
         <div class="solution-display" id="solution-display"><span style="color:var(--text-dimmer);font-size:9px">Make a move to record it here…</span></div>
         <div class="nav-row" style="margin-top:6px">
-          <button class="nav-btn" id="nav-start" onclick="navGo('start')" title="Go to start">⇤</button>
-          <button class="nav-btn" id="nav-prev"  onclick="navGo('prev')"  title="Previous move">←</button>
-          <button class="nav-btn" id="nav-next"  onclick="navGo('next')"  title="Next move">→</button>
-          <button class="nav-btn" id="nav-end"   onclick="navGo('end')"   title="Go to end">⇥</button>
-          <button class="nav-btn" onclick="clearMoveHistory()" title="Clear moves" style="margin-left:auto;font-size:10px">✕</button>
+          <button class="nav-btn" id="nav-start" onclick="navGo('start')" title="Start">⇤</button>
+          <button class="nav-btn" id="nav-prev"  onclick="navGo('prev')"  title="Prev">←</button>
+          <button class="nav-btn" id="nav-next"  onclick="navGo('next')"  title="Next">→</button>
+          <button class="nav-btn" id="nav-end"   onclick="navGo('end')"   title="End">⇥</button>
+          <button class="nav-btn" onclick="clearMoveHistory()" title="Clear" style="margin-left:auto;font-size:10px">✕</button>
           <span class="nav-status" id="nav-status"></span>
         </div>
       </div>
     </div>
     <div class="search-section">
       <button class="btn-search" onclick="searchByCurrentPosition()">⚡ Search similar positions</button>
+      <button class="btn-export" id="export-btn" onclick="exportLabels()" style="display:none">↓ Export selected (<span id="sel-count">0</span>)</button>
     </div>
   </aside>
   <main>
-    <div class="tb">
-      <div class="tbs">
-        <span class="tlbl">Field</span>
-        <button class="fb active" onclick="setField('text_all')">text_all</button>
-        <button class="fb" onclick="setField('text_dynamic')">text_dynamic</button>
-        <button class="fb" onclick="setField('text_static')">text_static</button>
-      </div>
-      <div class="tbs">
-        <span class="tlbl">Rank</span>
-      </div>
-      <div class="tbs">
-        <span class="si"><b id="sel-count">0</b> selected <span id="sel-hint" style="color:var(--text-dimmer)"></span></span>
-        <button class="btn btn-g" onclick="clearSelection()">Clear</button>
-        <button class="btn btn-p" id="export-btn" onclick="exportPGN()" disabled>Export PGN ↓</button>
-      </div>
-    </div>
     <div class="ha" id="hits-area">
       <div class="ph"><div class="ico">⚡</div><div>Load a position and click Search</div></div>
     </div>
   </main>
 </div>
 
+<div id="drag-ghost"><img id="drag-ghost-img" src="" alt=""/></div>
+
 <script>
-// ─────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────
-const UNI={wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'};
 const LIGHT_SQ='#f0d9b5', DARK_SQ='#b58863';
 const PKS=['Q','R','B','N','P'];
-const PUW={Q:'♕',R:'♖',B:'♗',N:'♘',P:'♙'};
-const PUB={Q:'♛',R:'♜',B:'♝',N:'♞',P:'♟'};
 
-// ─────────────────────────────────────────────
-// BOARD STATE
-// ─────────────────────────────────────────────
+function pieceUrl(color, type){ return `/assets/${color}${type}.svg`; }
+function pieceImg(color, type, cls='piece-img'){
+  return `<img class="${cls}" src="${pieceUrl(color,type)}" alt="${color}${type}" draggable="false"/>`;
+}
+
+// ── BOARD STATE ──────────────────────────────────────────────────────────────
 let board = Array.from({length:8},()=>Array(8).fill(null));
-let turn = 'w';
-let pockets = {w:{Q:0,R:0,B:0,N:0,P:0}, b:{Q:0,R:0,B:0,N:0,P:0}};
+let turn='w', pockets={w:{Q:0,R:0,B:0,N:0,P:0},b:{Q:0,R:0,B:0,N:0,P:0}};
 let castling='-', enPassant='-', halfMove=0, fullMove=1;
+let chessJS=null;
+let selectedSq=null, selectedPocket=null, legalTargets=[];
+let moveHistory=[], historyIdx=-1, initialState=null;
+let currentQueryId=null, currentField='text_all', selectedHits=new Set();
 
-// chess.js — only used for legal-move highlighting
-// KEY FIX: we only pass a "clean" standard FEN (max 32 pieces).
-// After a drop, the position may have more pieces than a standard game,
-// so chess.js may reject it. We fall back to allowing all empty-square
-// moves in that case.
-let chessJS = null;
-
-// UI state
-let selectedSq = null;
-let selectedPocket = null;
-let legalTargets = [];
-
-// Move history — records every move played on the board
-// history[i] = { label: "e2e4" | "N@e6", state: snapshot }
-// historyIdx = index of currently viewed state (-1 = initial)
-let moveHistory = [];   // [{label, state}]
-let historyIdx  = -1;
-let initialState = null; // snapshot of board when FEN was last loaded
-
-let currentQueryId = null;
-let currentField   = 'text_all';
-let selectedHits   = new Set();
-
-// ─────────────────────────────────────────────
-// FEN PARSING (crazyhouse-aware)
-// ─────────────────────────────────────────────
-function parseCrazyhouseFen(fen) {
-  const raw   = fen.trim().replace(/\[([^\]]*)\]/, '/$1'); // normalise bracket notation
-  const parts = raw.split(' ');
-  const ranks = parts[0].split('/');
-
+// ── FEN PARSING ──────────────────────────────────────────────────────────────
+function parseCrazyhouseFen(fen){
+  const raw=fen.trim().replace(/\[([^\]]*)\]/,'/$1');
+  const parts=raw.split(' ');
+  const ranks=parts[0].split('/');
   let boardRanks, pocketStr='';
-  if(ranks.length>=9){ boardRanks=ranks.slice(0,8); pocketStr=ranks[8]; }
-  else               { boardRanks=ranks.slice(0,8); }
-
-  const nb = Array.from({length:8},()=>Array(8).fill(null));
+  if(ranks.length>=9){boardRanks=ranks.slice(0,8);pocketStr=ranks[8];}
+  else{boardRanks=ranks.slice(0,8);}
+  const nb=Array.from({length:8},()=>Array(8).fill(null));
   for(let r=0;r<8;r++){
     const row=boardRanks[r]||''; let c=0;
     for(const ch of row){
       if(c>=8)break;
       if('12345678'.includes(ch)){c+=+ch;}
-      else{ nb[r][c]={color:ch===ch.toUpperCase()?'w':'b', type:ch.toUpperCase()}; c++; }
+      else{nb[r][c]={color:ch===ch.toUpperCase()?'w':'b',type:ch.toUpperCase()};c++;}
     }
   }
   const np={w:{Q:0,R:0,B:0,N:0,P:0},b:{Q:0,R:0,B:0,N:0,P:0}};
   for(const ch of pocketStr){
     if('QRBNP'.includes(ch.toUpperCase())){
-      if(ch===ch.toUpperCase()) np.w[ch]++; else np.b[ch.toUpperCase()]++;
+      if(ch===ch.toUpperCase())np.w[ch]++;else np.b[ch.toUpperCase()]++;
     }
   }
-  return{
-    board:nb, pockets:np,
-    turn:(parts[1]||'w')==='b'?'b':'w',
-    castling:parts[2]||'-', enPassant:parts[3]||'-',
-    halfMove:parseInt(parts[4])||0, fullMove:parseInt(parts[5])||1
-  };
+  return{board:nb,pockets:np,turn:(parts[1]||'w')==='b'?'b':'w',
+         castling:parts[2]||'-',enPassant:parts[3]||'-',
+         halfMove:parseInt(parts[4])||0,fullMove:parseInt(parts[5])||1};
 }
 
 function applyState(s){
-  board     = s.board.map(r=>r.map(c=>c?{...c}:null));
-  pockets   = {w:{...s.pockets.w}, b:{...s.pockets.b}};
-  turn      = s.turn;
-  castling  = s.castling;
-  enPassant = s.enPassant;
-  halfMove  = s.halfMove;
-  fullMove  = s.fullMove;
-  syncChessJS();
+  board=s.board.map(r=>r.map(c=>c?{...c}:null));
+  pockets={w:{...s.pockets.w},b:{...s.pockets.b}};
+  turn=s.turn;castling=s.castling;enPassant=s.enPassant;
+  halfMove=s.halfMove;fullMove=s.fullMove;syncChessJS();
 }
 
 function applyFen(fen){
   const p=parseCrazyhouseFen(fen);
-  board=p.board; pockets=p.pockets; turn=p.turn;
-  castling=p.castling; enPassant=p.enPassant;
-  halfMove=p.halfMove; fullMove=p.fullMove;
-  syncChessJS();
+  board=p.board;pockets=p.pockets;turn=p.turn;
+  castling=p.castling;enPassant=p.enPassant;
+  halfMove=p.halfMove;fullMove=p.fullMove;syncChessJS();
 }
 
 function snapshotState(label=''){
-  return{
-    board:board.map(r=>r.map(c=>c?{...c}:null)),
-    pockets:{w:{...pockets.w},b:{...pockets.b}},
-    turn,castling,enPassant,halfMove,fullMove,label
-  };
+  return{board:board.map(r=>r.map(c=>c?{...c}:null)),
+         pockets:{w:{...pockets.w},b:{...pockets.b}},
+         turn,castling,enPassant,halfMove,fullMove,label};
 }
 
-// ─────────────────────────────────────────────
-// CHESS.JS SYNC — only feed it a clean std FEN
-// ─────────────────────────────────────────────
 function syncChessJS(){
   if(!window.Chess){chessJS=null;return;}
-  const stdFen=boardToStdFen();
-  try{
-    if(!chessJS) chessJS=new Chess();
-    // chess.js may reject positions with >16 pieces per side (can happen after drops).
-    // In that case we simply leave chessJS as-is (no legal-move dots, but play continues).
-    chessJS.load(stdFen);
-  }catch(e){
-    // Ignore — board state is managed by our own code; chess.js is only for highlights.
-  }
+  try{if(!chessJS)chessJS=new Chess();chessJS.load(boardToStdFen());}catch(e){}
 }
 
 function boardToStdFen(){
@@ -304,9 +237,9 @@ function boardToStdFen(){
     let e=0;
     for(let c=0;c<8;c++){
       const p=board[r][c];
-      if(!p){e++;}else{if(e){s+=e;e=0;} s+=p.color==='w'?p.type:p.type.toLowerCase();}
+      if(!p){e++;}else{if(e){s+=e;e=0;}s+=p.color==='w'?p.type:p.type.toLowerCase();}
     }
-    if(e)s+=e; if(r<7)s+='/';
+    if(e)s+=e;if(r<7)s+='/';
   }
   return`${s} ${turn} ${castling} ${enPassant} ${halfMove} ${fullMove}`;
 }
@@ -322,20 +255,13 @@ function currentFenString(){
   return parts.join(' ');
 }
 
-// ─────────────────────────────────────────────
-// LEGAL MOVES
-// ─────────────────────────────────────────────
+// ── LEGAL MOVES ──────────────────────────────────────────────────────────────
 function sqName(r,c){return String.fromCharCode('a'.charCodeAt(0)+c)+String(8-r);}
 function sqIdx(name){return{r:8-parseInt(name[1]),c:name.charCodeAt(0)-'a'.charCodeAt(0)};}
-
 function getLegalTargetsForSq(r,c){
   if(!chessJS)return[];
-  try{
-    const moves=chessJS.moves({square:sqName(r,c),verbose:true});
-    return moves.map(m=>sqIdx(m.to));
-  }catch(e){return[];}
+  try{return chessJS.moves({square:sqName(r,c),verbose:true}).map(m=>sqIdx(m.to));}catch(e){return[];}
 }
-
 function getLegalDropSquares(){
   const out=[];
   for(let r=0;r<8;r++)for(let c=0;c<8;c++){
@@ -346,149 +272,89 @@ function getLegalDropSquares(){
   return out;
 }
 
-// ─────────────────────────────────────────────
-// MAKE MOVE / DROP
-// ─────────────────────────────────────────────
+// ── MAKE MOVE / DROP ─────────────────────────────────────────────────────────
 function makeMove(fr,fc,tr,tc){
-  const piece=board[fr][fc];
-  const captured=board[tr][tc];
-
-  // Standard capture → pocket
-  if(captured){
-    const pt=captured.type==='K'?'Q':captured.type;
-    pockets[piece.color][pt]=(pockets[piece.color][pt]||0)+1;
-  }
-  // En passant
+  const piece=board[fr][fc], captured=board[tr][tc];
+  if(captured){const pt=captured.type==='K'?'Q':captured.type;pockets[piece.color][pt]=(pockets[piece.color][pt]||0)+1;}
   let epCap=false;
   if(piece.type==='P'&&sqName(fr,fc)[0]!==sqName(tr,tc)[0]&&!captured){
-    epCap=true;
-    board[fr][tc]=null;
-    pockets[piece.color]['P']=(pockets[piece.color]['P']||0)+1;
+    epCap=true;board[fr][tc]=null;pockets[piece.color]['P']=(pockets[piece.color]['P']||0)+1;
   }
-
-  board[tr][tc]=piece; board[fr][fc]=null;
-  if(piece.type==='P'&&(tr===0||tr===7)) board[tr][tc]={color:piece.color,type:'Q'};
-
+  board[tr][tc]=piece;board[fr][fc]=null;
+  if(piece.type==='P'&&(tr===0||tr===7))board[tr][tc]={color:piece.color,type:'Q'};
   if(piece.type==='K'){
     if(fc===4&&tc===6){board[tr][5]=board[tr][7];board[tr][7]=null;}
     if(fc===4&&tc===2){board[tr][3]=board[tr][0];board[tr][0]=null;}
     if(piece.color==='w')castling=castling.replace('K','').replace('Q','');
     else castling=castling.replace('k','').replace('q','');
   }
-  if(['R','K'].includes(piece.type)){
-    if(piece.color==='w'){if(fr===7&&fc===7)castling=castling.replace('K','');if(fr===7&&fc===0)castling=castling.replace('Q','');}
-    else{if(fr===0&&fc===7)castling=castling.replace('k','');if(fr===0&&fc===0)castling=castling.replace('q','');}
-  }
   enPassant=piece.type==='P'&&Math.abs(fr-tr)===2?sqName((fr+tr)/2,fc):'-';
-  turn=turn==='w'?'b':'w';
-  if(turn==='w')fullMove++;
+  turn=turn==='w'?'b':'w';if(turn==='w')fullMove++;
   halfMove=piece.type==='P'||captured||epCap?0:halfMove+1;
-
-  syncChessJS();
-  updateFenInput();
-  const label = sqName(fr,fc) + sqName(tr,tc);
-  recordMove(label);
+  syncChessJS();updateFenInput();recordMove(sqName(fr,fc)+sqName(tr,tc));
 }
 
 function makeDrop(piece,color,tr,tc){
   board[tr][tc]={color,type:piece};
   pockets[color][piece]=Math.max(0,(pockets[color][piece]||0)-1);
-  turn=turn==='w'?'b':'w';
-  if(turn==='w')fullMove++;
-  halfMove=0;
-  syncChessJS();
-  updateFenInput();
-  const label = piece + '@' + sqName(tr,tc);
-  recordMove(label);
+  turn=turn==='w'?'b':'w';if(turn==='w')fullMove++;halfMove=0;
+  syncChessJS();updateFenInput();recordMove(piece+'@'+sqName(tr,tc));
 }
 
-// ─────────────────────────────────────────────
-// CLICK HANDLERS
-// ─────────────────────────────────────────────
+// ── CLICK HANDLERS ───────────────────────────────────────────────────────────
 function onSquareClick(r,c){
-  // If we're navigating back in history, clicking a piece branches — truncate future
-  if(historyIdx < moveHistory.length - 1){
-    moveHistory = moveHistory.slice(0, historyIdx + 1);
-  }
-
+  if(historyIdx<moveHistory.length-1)moveHistory=moveHistory.slice(0,historyIdx+1);
   if(selectedPocket){
     const ok=legalTargets.some(t=>t.r===r&&t.c===c);
-    if(ok) makeDrop(selectedPocket.piece,selectedPocket.color,r,c);
-    selectedPocket=null; selectedSq=null; legalTargets=[];
-    renderBoard(); renderPockets(); return;
+    if(ok)makeDrop(selectedPocket.piece,selectedPocket.color,r,c);
+    selectedPocket=null;selectedSq=null;legalTargets=[];
+    renderBoard();renderPockets();return;
   }
-
   if(selectedSq){
     const ok=legalTargets.some(t=>t.r===r&&t.c===c);
-    if(ok){
-      makeMove(selectedSq.r,selectedSq.c,r,c);
-      selectedSq=null; legalTargets=[];
-      renderBoard(); renderPockets(); return;
-    }
-    if(selectedSq.r===r&&selectedSq.c===c){
-      selectedSq=null; legalTargets=[]; renderBoard(); return;
-    }
-    selectedSq=null; legalTargets=[];
+    if(ok){makeMove(selectedSq.r,selectedSq.c,r,c);selectedSq=null;legalTargets=[];renderBoard();renderPockets();return;}
+    if(selectedSq.r===r&&selectedSq.c===c){selectedSq=null;legalTargets=[];renderBoard();return;}
+    selectedSq=null;legalTargets=[];
   }
-
   const piece=board[r][c];
-  if(piece&&piece.color===turn){
-    selectedSq={r,c};
-    legalTargets=getLegalTargetsForSq(r,c);
-  }
+  if(piece&&piece.color===turn){selectedSq={r,c};legalTargets=getLegalTargetsForSq(r,c);}
   renderBoard();
 }
 
 function onPocketPieceClick(color,piece){
   if(color!==turn)return;
   if((pockets[color][piece]||0)<=0)return;
-  if(historyIdx < moveHistory.length - 1){
-    moveHistory = moveHistory.slice(0, historyIdx + 1);
-  }
-
+  if(historyIdx<moveHistory.length-1)moveHistory=moveHistory.slice(0,historyIdx+1);
   selectedSq=null;
   if(selectedPocket&&selectedPocket.color===color&&selectedPocket.piece===piece){
-    selectedPocket=null; legalTargets=[]; renderBoard(); renderPockets(); return;
+    selectedPocket=null;legalTargets=[];renderBoard();renderPockets();return;
   }
-  selectedPocket={color,piece};
-  legalTargets=getLegalDropSquares();
-  renderBoard(); renderPockets();
+  selectedPocket={color,piece};legalTargets=getLegalDropSquares();
+  renderBoard();renderPockets();
 }
 
-// ─────────────────────────────────────────────
-// RENDER BOARD
-// ─────────────────────────────────────────────
+// ── RENDER BOARD ─────────────────────────────────────────────────────────────
 function renderBoard(){
   const el=document.getElementById('iboard');
   el.innerHTML='';
   const SQ=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sq'))||48;
   const legalSet={};
-  for(const t of legalTargets) legalSet[t.r*8+t.c]=board[t.r][t.c]?'cap':'dot';
-
+  for(const t of legalTargets)legalSet[t.r*8+t.c]=board[t.r][t.c]?'cap':'dot';
   for(let r=0;r<8;r++)for(let c=0;c<8;c++){
-    const isLight=(r+c)%2===0;
-    const isSel=selectedSq&&selectedSq.r===r&&selectedSq.c===c;
+    const isLight=(r+c)%2===0, isSel=selectedSq&&selectedSq.r===r&&selectedSq.c===c;
     const lt=legalSet[r*8+c];
-
     const div=document.createElement('div');
     div.className='sq '+(isLight?'light':'dark');
     if(isSel)div.classList.add('selected');
     if(lt==='dot')div.classList.add('legal-dot');
     if(lt==='cap')div.classList.add('legal-cap');
-    div.style.cssText=`left:${c*SQ}px;top:${r*SQ}px;width:${SQ}px;height:${SQ}px;font-size:${Math.round(SQ*0.72)}px`;
-
+    div.style.cssText=`left:${c*SQ}px;top:${r*SQ}px;width:${SQ}px;height:${SQ}px;`;
+    div.dataset.r=r;div.dataset.c=c;
     const piece=board[r][c];
-    if(piece){
-      const span=document.createElement('span');
-      span.className='piece '+(piece.color==='w'?'white':'black');
-      span.textContent=UNI[piece.color+piece.type]||'?';
-      div.appendChild(span);
-    }
-
+    if(piece){const img=document.createElement('img');img.className='piece-img';img.src=pieceUrl(piece.color,piece.type);img.alt=piece.color+piece.type;img.draggable=false;div.appendChild(img);}
     if(c===0){const co=document.createElement('span');co.className='coord rank'+(isLight?'':' on-dark');co.textContent=8-r;div.appendChild(co);}
     if(r===7){const co=document.createElement('span');co.className='coord file'+(isLight?'':' on-dark');co.textContent=String.fromCharCode('a'.charCodeAt(0)+c);div.appendChild(co);}
-
-    div.addEventListener('click',()=>onSquareClick(r,c));
+    div.addEventListener('click',()=>{if(!_dragMoved)onSquareClick(r,c);});
     el.appendChild(div);
   }
 }
@@ -500,7 +366,6 @@ function renderPockets(){
 
 function renderPocketStrip(elId,color){
   const el=document.getElementById(elId);
-  const uni=color==='w'?PUW:PUB;
   const cls=color==='w'?'pw':'pb';
   let html=`<span class="plbl">${color==='w'?'W':'B'}</span>`;
   let any=false;
@@ -509,206 +374,192 @@ function renderPocketStrip(elId,color){
     if(n>0){
       any=true;
       const isSel=selectedPocket&&selectedPocket.color===color&&selectedPocket.piece===pc;
-      html+=`<span class="pp ${cls}${isSel?' pocket-sel':''}" onclick="onPocketPieceClick('${color}','${pc}')" title="Drop ${pc}">${uni[pc]}${n>1?`<span class="pp-count">${n}</span>`:''}</span>`;
+      html+=`<span class="pp ${cls}${isSel?' pocket-sel':''}" onclick="onPocketPieceClick('${color}','${pc}')" title="Drop ${pc}">
+        ${pieceImg(color,pc,'piece-img')}${n>1?`<span class="pp-count">${n}</span>`:''}
+      </span>`;
     }
   }
   if(!any)html+='<span class="empty-pocket">empty</span>';
   el.innerHTML=html;
 }
 
-// ─────────────────────────────────────────────
-// FEN INPUT
-// ─────────────────────────────────────────────
-function updateFenInput(){
-  document.getElementById('fen-input').value=currentFenString();
+// ── DRAG & DROP ──────────────────────────────────────────────────────────────
+let _dragging=null, _dragMoved=false;
+const _ghost=document.getElementById('drag-ghost');
+const _ghostImg=document.getElementById('drag-ghost-img');
+
+document.getElementById('iboard').addEventListener('pointerdown',e=>{
+  const sq=e.target.closest('.sq');if(!sq)return;
+  const r=parseInt(sq.dataset.r),c=parseInt(sq.dataset.c);
+  const p=board[r][c];if(!p||p.color!==turn)return;
+  e.preventDefault();_dragMoved=false;_dragging={r,c,color:p.color,type:p.type};
+  _ghostImg.src=pieceUrl(p.color,p.type);_ghost.style.display='block';
+  _moveGhost(e.clientX,e.clientY);
+  document.getElementById('iboard').setPointerCapture(e.pointerId);
+  selectedSq={r,c};legalTargets=getLegalTargetsForSq(r,c);renderBoard();
+});
+
+document.addEventListener('pointermove',e=>{
+  if(!_dragging)return;_dragMoved=true;_moveGhost(e.clientX,e.clientY);
+  document.querySelectorAll('#iboard .drag-over-sq').forEach(el=>el.classList.remove('drag-over-sq'));
+  const target=_sqFromPoint(e.clientX,e.clientY);
+  if(target){const sq=document.querySelector(`#iboard .sq[data-r="${target.r}"][data-c="${target.c}"]`);if(sq)sq.classList.add('drag-over-sq');}
+});
+
+document.addEventListener('pointerup',e=>{
+  if(!_dragging)return;
+  _ghost.style.display='none';
+  document.querySelectorAll('#iboard .drag-over-sq').forEach(el=>el.classList.remove('drag-over-sq'));
+  if(_dragMoved){
+    const target=_sqFromPoint(e.clientX,e.clientY);
+    if(target&&!(target.r===_dragging.r&&target.c===_dragging.c)){
+      const ok=legalTargets.some(t=>t.r===target.r&&t.c===target.c);
+      if(ok){
+        if(historyIdx<moveHistory.length-1)moveHistory=moveHistory.slice(0,historyIdx+1);
+        makeMove(_dragging.r,_dragging.c,target.r,target.c);
+        selectedSq=null;legalTargets=[];renderBoard();renderPockets();_dragging=null;return;
+      }
+    }
+    selectedSq=null;legalTargets=[];renderBoard();
+  }
+  _dragging=null;
+});
+
+function _moveGhost(x,y){_ghost.style.left=x+'px';_ghost.style.top=y+'px';}
+function _sqFromPoint(x,y){
+  const rect=document.getElementById('iboard').getBoundingClientRect();
+  if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)return null;
+  const SQ=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sq'))||48;
+  const c=Math.floor((x-rect.left)/SQ),r=Math.floor((y-rect.top)/SQ);
+  if(c<0||c>7||r<0||r>7)return null;return{r,c};
 }
+
+// ── FEN INPUT ────────────────────────────────────────────────────────────────
+function updateFenInput(){document.getElementById('fen-input').value=currentFenString();}
 
 function loadFen(){
   const raw=document.getElementById('fen-input').value.trim();
   if(!raw)return;
-  try{
-    applyFen(raw);
-    initialState = snapshotState('initial');
-    moveHistory=[]; historyIdx=-1;
-    selectedSq=null;selectedPocket=null;legalTargets=[];
-    renderBoard();renderPockets();renderMoveList();
-  }catch(e){alert('Could not parse FEN: '+e.message);}
+  try{applyFen(raw);initialState=snapshotState('initial');moveHistory=[];historyIdx=-1;
+    selectedSq=null;selectedPocket=null;legalTargets=[];renderBoard();renderPockets();renderMoveList();}
+  catch(e){alert('Could not parse FEN: '+e.message);}
 }
 
 function resetBoard(){
   const s='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  applyFen(s);
-  document.getElementById('fen-input').value=s;
-  initialState = snapshotState('initial');
-  moveHistory=[]; historyIdx=-1;
-  selectedSq=null;selectedPocket=null;legalTargets=[];
-  renderBoard();renderPockets();renderMoveList();
+  applyFen(s);document.getElementById('fen-input').value=s;
+  initialState=snapshotState('initial');moveHistory=[];historyIdx=-1;
+  selectedSq=null;selectedPocket=null;legalTargets=[];renderBoard();renderPockets();renderMoveList();
 }
 
-// ─────────────────────────────────────────────
-// MOVE HISTORY + NAVIGATION
-// ─────────────────────────────────────────────
-// Records every move made on the interactive board.
-// historyIdx: -1 = viewing initial state, 0..n = viewing after move n
-
+// ── MOVE HISTORY ─────────────────────────────────────────────────────────────
 function recordMove(label){
-  // Snapshot current state AFTER the move
-  const snap = snapshotState(label);
-  // Truncate any future states (branch from here)
-  moveHistory = moveHistory.slice(0, historyIdx + 1);
-  moveHistory.push({label, state: snap});
-  historyIdx = moveHistory.length - 1;
-  renderMoveList();
+  const snap=snapshotState(label);
+  moveHistory=moveHistory.slice(0,historyIdx+1);
+  moveHistory.push({label,state:snap});historyIdx=moveHistory.length-1;renderMoveList();
 }
 
 function clearMoveHistory(){
-  moveHistory = [];
-  historyIdx = -1;
-  if(initialState) applyState(initialState);
-  selectedSq=null; selectedPocket=null; legalTargets=[];
-  renderBoard(); renderPockets();
-  updateFenInput();
-  renderMoveList();
+  moveHistory=[];historyIdx=-1;
+  if(initialState)applyState(initialState);
+  selectedSq=null;selectedPocket=null;legalTargets=[];
+  renderBoard();renderPockets();updateFenInput();renderMoveList();
 }
 
 function navGo(dir){
-  const max = moveHistory.length - 1;
-  if(dir==='start')      historyIdx = -1;
-  else if(dir==='end')   historyIdx = max;
-  else if(dir==='prev')  historyIdx = Math.max(-1, historyIdx - 1);
-  else if(dir==='next')  historyIdx = Math.min(max, historyIdx + 1);
-
-  // Restore the board state for historyIdx
-  if(historyIdx === -1){
-    if(initialState) applyState(initialState);
-  } else {
-    applyState(moveHistory[historyIdx].state);
-  }
-  selectedSq=null; selectedPocket=null; legalTargets=[];
-  renderBoard(); renderPockets();
-  updateFenInput();
-  renderMoveList();
+  const max=moveHistory.length-1;
+  if(dir==='start')historyIdx=-1;else if(dir==='end')historyIdx=max;
+  else if(dir==='prev')historyIdx=Math.max(-1,historyIdx-1);
+  else if(dir==='next')historyIdx=Math.min(max,historyIdx+1);
+  if(historyIdx===-1){if(initialState)applyState(initialState);}
+  else applyState(moveHistory[historyIdx].state);
+  selectedSq=null;selectedPocket=null;legalTargets=[];
+  renderBoard();renderPockets();updateFenInput();renderMoveList();
 }
 
 function navJump(i){
-  historyIdx = i;
-  applyState(moveHistory[i].state);
-  selectedSq=null; selectedPocket=null; legalTargets=[];
-  renderBoard(); renderPockets();
-  updateFenInput();
-  renderMoveList();
+  historyIdx=i;applyState(moveHistory[i].state);
+  selectedSq=null;selectedPocket=null;legalTargets=[];
+  renderBoard();renderPockets();updateFenInput();renderMoveList();
 }
 
 function renderMoveList(){
-  const el = document.getElementById('solution-display');
-  const status = document.getElementById('nav-status');
-  const n = moveHistory.length;
-
-  if(n === 0){
-    el.innerHTML = '<span style="color:var(--text-dimmer);font-size:9px">Make a move to record it here…</span>';
-    status.textContent = '';
-    document.getElementById('nav-start').disabled = true;
-    document.getElementById('nav-prev').disabled  = true;
-    document.getElementById('nav-next').disabled  = true;
-    document.getElementById('nav-end').disabled   = true;
-    return;
+  const el=document.getElementById('solution-display');
+  const status=document.getElementById('nav-status');
+  const n=moveHistory.length;
+  if(n===0){
+    el.innerHTML='<span style="color:var(--text-dimmer);font-size:9px">Make a move to record it here…</span>';
+    status.textContent='';
+    ['nav-start','nav-prev','nav-next','nav-end'].forEach(id=>document.getElementById(id).disabled=true);return;
   }
-
-  // Pair moves into numbered rows: 1. e2e4  e7e5  2. ...
-  let html = '';
-  // Figure out starting move number from initialState fullMove
-  const startFull = initialState ? initialState.fullMove : 1;
-  const startTurn = initialState ? initialState.turn : 'w';
-
-  moveHistory.forEach((m, i) => {
-    const isCurrent = i === historyIdx;
-    // Move number label: show before white move, or before first move if black starts
-    const moveNum = startFull + Math.floor((i + (startTurn === 'b' ? 1 : 0)) / 2);
-    const isWhiteMove = (startTurn === 'w') ? (i % 2 === 0) : (i % 2 === 1);
-    if(isWhiteMove || i === 0) {
-      if(i > 0) html += ' ';
-      html += `<span style="color:var(--text-dimmer);font-size:9px">${moveNum}.</span> `;
-    } else {
-      html += ' ';
-    }
-    html += `<span class="sol-move${isCurrent?' current':i<historyIdx?' played':''}"
-      onclick="navJump(${i})" title="Jump to move ${i+1}">${escHtml(m.label)}</span>`;
+  const startFull=initialState?initialState.fullMove:1;
+  const startTurn=initialState?initialState.turn:'w';
+  let html='';
+  moveHistory.forEach((m,i)=>{
+    const isCurrent=i===historyIdx;
+    const moveNum=startFull+Math.floor((i+(startTurn==='b'?1:0))/2);
+    const isWhiteMove=(startTurn==='w')?(i%2===0):(i%2===1);
+    if(isWhiteMove||i===0){if(i>0)html+=' ';html+=`<span style="color:var(--text-dimmer);font-size:9px">${moveNum}.</span> `;}
+    else{html+=' ';}
+    html+=`<span class="sol-move${isCurrent?' current':i<historyIdx?' played':''}" onclick="navJump(${i})">${escHtml(m.label)}</span>`;
   });
-
-  el.innerHTML = html;
-  status.textContent = historyIdx === -1 ? 'start' : `${historyIdx+1}/${n}`;
-
-  document.getElementById('nav-start').disabled = historyIdx === -1;
-  document.getElementById('nav-prev').disabled  = historyIdx === -1;
-  document.getElementById('nav-next').disabled  = historyIdx === n - 1;
-  document.getElementById('nav-end').disabled   = historyIdx === n - 1;
-
-  // Scroll current move into view
-  const cur = el.querySelector('.sol-move.current');
-  if(cur) cur.scrollIntoView({block:'nearest', inline:'nearest'});
+  el.innerHTML=html;
+  status.textContent=historyIdx===-1?'start':`${historyIdx+1}/${n}`;
+  document.getElementById('nav-start').disabled=historyIdx===-1;
+  document.getElementById('nav-prev').disabled=historyIdx===-1;
+  document.getElementById('nav-next').disabled=historyIdx===n-1;
+  document.getElementById('nav-end').disabled=historyIdx===n-1;
+  el.querySelector('.sol-move.current')?.scrollIntoView({block:'nearest',inline:'nearest'});
 }
 
-// ─────────────────────────────────────────────
-// MINI CANVAS BOARD (hit cards)
-// ─────────────────────────────────────────────
-function parseFenToRows(fen){
-  const rows=[];
-  for(const row of fen.split(' ')[0].split('/').slice(0,8)){
-    const r=[];
-    for(const ch of row){if('12345678'.includes(ch))for(let i=0;i<+ch;i++)r.push(null);else r.push(ch);}
-    rows.push(r);
-  }
-  return rows;
-}
-
-function drawMiniBoard(canvas,fen,ori,sqSize){
-  const N=8,sz=sqSize*N;
-  canvas.width=sz;canvas.height=sz;
-  const ctx=canvas.getContext('2d');
-  const rows=parseFenToRows(fen);
-  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
-    ctx.fillStyle=(r+c)%2===0?LIGHT_SQ:DARK_SQ;
-    const dr=ori==='b'?(7-r):r,dc=ori==='b'?(7-c):c;
-    ctx.fillRect(dc*sqSize,dr*sqSize,sqSize,sqSize);
-    const piece=rows[r]&&rows[r][c];
-    if(piece){
-      const col=piece===piece.toUpperCase()?'w':'b';
-      const uni=UNI[col+piece.toUpperCase()]||'?';
-      ctx.font=`${Math.round(sqSize*0.76)}px serif`;
-      ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.shadowColor='rgba(0,0,0,0.7)';ctx.shadowBlur=sqSize*0.15;
-      ctx.fillStyle=col==='w'?'#ffffff':'#1a1a1a';
-      ctx.fillText(uni,dc*sqSize+sqSize/2,dr*sqSize+sqSize/2);
-      ctx.shadowColor='transparent';
+// ── MINI BOARD ───────────────────────────────────────────────────────────────
+function parseFenToGrid(fen){
+  const grid=Array(64).fill(null);
+  const rows=fen.split(' ')[0].replace(/\[.*\]/,'').split('/').slice(0,8);
+  for(let r=0;r<8;r++){
+    let c=0;
+    for(const ch of(rows[r]||'')){
+      if('12345678'.includes(ch)){c+=+ch;}
+      else{grid[r*8+c]={color:ch===ch.toUpperCase()?'w':'b',type:ch.toUpperCase()};c++;}
     }
   }
+  return grid;
 }
 
-function parsePocketStr(str){
-  // Handle dict object from backend
-  if(str && typeof str === 'object'){
-    const res={};
-    for(const [k,v] of Object.entries(str)) res[k.toUpperCase()]=v;
-    return res;
+function buildMiniBoard(fen,sqSize){
+  const N=8,sz=sqSize*N;
+  const wrap=document.createElement('div');
+  wrap.style.cssText=`position:relative;width:${sz}px;height:${sz}px;flex-shrink:0`;
+  const canvas=document.createElement('canvas');
+  canvas.width=sz;canvas.height=sz;
+  canvas.style.cssText=`display:block;position:absolute;top:0;left:0`;
+  const ctx=canvas.getContext('2d');
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+    ctx.fillStyle=(r+c)%2===0?LIGHT_SQ:DARK_SQ;ctx.fillRect(c*sqSize,r*sqSize,sqSize,sqSize);
   }
-  if(!str||str==='—'||str==='-')return{};
-  const res={};
-  for(const t of String(str).trim().split(/\s+/)){
-    const m=t.match(/^([QRBNP])(\d+)$/);
-    if(m)res[m[1]]=+m[2];
+  wrap.appendChild(canvas);
+  const grid=parseFenToGrid(fen);
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+    const p=grid[r*8+c];if(!p)continue;
+    const img=document.createElement('img');
+    img.src=pieceUrl(p.color,p.type);
+    img.style.cssText=`position:absolute;width:${sqSize}px;height:${sqSize}px;left:${c*sqSize}px;top:${r*sqSize}px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))`;
+    img.draggable=false;wrap.appendChild(img);
   }
-  return res;
+  return wrap;
 }
-function miniPocketHTML(pocketStr,side){
-  const p=parsePocketStr(pocketStr),uni=side==='w'?PUW:PUB;
+
+function miniPocketImgs(pocket,side){
+  if(!pocket||typeof pocket!=='object')return'';
   let o='';
-  for(const pc of PKS){const n=p[pc]||0;for(let i=0;i<n;i++)o+=`<span class="mpp" style="color:${side==='w'?'#fff':'#bbb'}">${uni[pc]}</span>`;}
+  for(const pc of PKS){
+    const n=pocket[pc]||0;
+    for(let i=0;i<n;i++)o+=`<img class="mpp-img" src="${pieceUrl(side,pc)}" alt="${side}${pc}"/>`;
+  }
   return o;
 }
 
-// ─────────────────────────────────────────────
-// SEARCH
-// ─────────────────────────────────────────────
+// ── SEARCH ───────────────────────────────────────────────────────────────────
 async function searchByCurrentPosition(){
   document.getElementById('hits-area').innerHTML='<div class="ph"><div class="spinner"></div><div>Searching…</div></div>';
   try{
@@ -719,6 +570,7 @@ async function searchByCurrentPosition(){
     const data=await res.json();
     if(data.error){alert(data.error);return;}
     currentQueryId=data.query.id;
+    selectedHits.clear();
     renderHits(data.hits);
   }catch(e){
     console.error(e);
@@ -726,91 +578,156 @@ async function searchByCurrentPosition(){
   }
 }
 
-// ─────────────────────────────────────────────
-// HITS
-// ─────────────────────────────────────────────
+// ── HITS ─────────────────────────────────────────────────────────────────────
 function renderHits(hits){
   const area=document.getElementById('hits-area');
   if(!hits||!hits.length){area.innerHTML='<div class="ph"><div class="ico">🤷</div><div>No hits found</div></div>';return;}
-  area.innerHTML=`<div class="hg">${hits.map((h,i)=>hitCardHTML(h,i)).join('')}</div>`;
-  const SQ_SM=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sq-sm'))||17;
-  hits.forEach(h=>{
-    if(h.board_fen){
-      const c=document.getElementById(`hb_${cssId(h.id)}`);
-      if(c)drawMiniBoard(c,h.board_fen,h.turn==='black'?'b':'w',SQ_SM);
-    }
-  });
+  const grid=document.createElement('div');
+  grid.className='hg';
+  hits.forEach((h,i)=>grid.appendChild(buildHitCard(h,i)));
+  area.innerHTML='';area.appendChild(grid);
 }
 
-function hitCardHTML(h,i){
+function buildHitCard(h, i){
   const sel=selectedHits.has(h.id);
-  const pv=(h.pv||[]).slice(0,6).join(' ');
-  const bm=h.best_move||'—';
-  const mate=h.mate_before;
-  const solLabel=mate?`Mate in ${mate}: `:'Best: ';
+  const card=document.createElement('div');
+  card.className='hc'+(sel?' sel':'');
+  card.id='card_'+cssId(h.id);
+
+  const SQ_SM=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sq-sm'))||18;
   const moveNum=h.ply?Math.ceil(h.ply/2):'?';
-  const lichessLink=h.lichess_url?`${h.lichess_url}#${h.ply}`:null;
-  return `
-  <div class="hc ${sel?'sel':''}" id="card_${cssId(h.id)}" onclick="toggleHit('${escJs(h.id)}')">
-    <div class="chk">${sel?'✓':''}</div>
-    <div class="hi2">
-      <div class="hcb">
-        <div class="mini-pocket">${miniPocketHTML(h.pockets_black,'b')||'<span style="font-size:8px;opacity:.2">·</span>'}</div>
-        <canvas id="hb_${cssId(h.id)}"></canvas>
-        <div class="mini-pocket">${miniPocketHTML(h.pockets_white,'w')||'<span style="font-size:8px;opacity:.2">·</span>'}</div>
-      </div>
-      <div class="hci">
-        <div class="hrk">Hit #${i+1} <span class="hsc">${h.score!=null?h.score.toFixed(2):''}</span></div>
-        <div class="hm">
-          ${mate!=null?`<span class="badge mate">M${mate}</span>`:''}
-          ${h.delta!=null?`<span class="badge delta">Δ${Math.round(h.delta)}</span>`:''}
-          <span class="badge">ply ${h.ply}</span>
-          ${h.pv_has_drop?'<span class="badge drop">DROP</span>':''}
-        </div>
-        <div class="hsol">${solLabel}<span class="bm">${escHtml(bm)}</span> ${escHtml(pv)}</div>
-        ${lichessLink
-          ?`<a class="hlk" href="${escHtml(lichessLink)}" target="_blank" onclick="event.stopPropagation()">↗ Game (move ${moveNum})</a>`
-          :`<span style="font-family:var(--mono);font-size:9px;color:var(--text-dimmer)">move ${moveNum}</span>`}
-      </div>
-    </div>
-  </div>`;
+  const sol=Array.isArray(h.solution_san)?h.solution_san:[];
+  const hasDrop=sol.some(m=>m.includes('@'));
+  const mate=h.mate_in||h.mate_before;
+
+  // Lichess link — game URL at the puzzle ply
+  const gameUrl=h.site||'';
+  const lichessUrl=gameUrl&&h.ply?`${gameUrl}#${h.ply}`:'';
+
+  // Rating display
+  const ratingAvg=h.game_rating_avg;
+  const ratingStr=ratingAvg?`${ratingAvg} avg`
+    :(h.white_elo&&h.black_elo?`${h.white_elo}/${h.black_elo}`:'—');
+
+  // Players display
+  const playersStr=h.white&&h.black?`${h.white} vs ${h.black}`:'—';
+
+  // Checkmark
+  const chk=document.createElement('div');
+  chk.className='chk';chk.textContent=sel?'✓':'';
+  card.appendChild(chk);
+
+  const hi2=document.createElement('div');hi2.className='hi2';
+
+  // Board column
+  const hcb=document.createElement('div');hcb.className='hcb';
+  const psB=document.createElement('div');psB.className='pocket-side pocket-side-top';
+  psB.innerHTML=miniPocketImgs(h.pockets_black,'b');hcb.appendChild(psB);
+  if(h.board_fen)hcb.appendChild(buildMiniBoard(h.board_fen,SQ_SM));
+  const psW=document.createElement('div');psW.className='pocket-side pocket-side-bot';
+  psW.innerHTML=miniPocketImgs(h.pockets_white,'w');hcb.appendChild(psW);
+  hi2.appendChild(hcb);
+
+  // Info column
+  const hci=document.createElement('div');hci.className='hci';
+
+  // Header: rank + score + badges
+  const hrk=document.createElement('div');hrk.className='hm';
+  hrk.innerHTML=`
+    <span class="hrk">Hit #${i+1}</span>
+    <span class="hsc">${h.score!=null?h.score.toFixed(2):''}</span>
+    ${mate!=null?`<span class="badge mate">M${mate}</span>`:''}
+    ${hasDrop?'<span class="badge drop">DROP</span>':''}
+    ${h.engine_verified?'<span class="badge verified">✓ ENG</span>':''}
+  `;
+  hci.appendChild(hrk);
+
+  // Solution
+  const solRow=document.createElement('div');solRow.className='hrow';
+  const solStr=sol.length
+    ?`<span class="bm">${escHtml(sol[0])}</span>${sol.length>1?' '+escHtml(sol.slice(1).join(' ')):''}` 
+    :'<span style="opacity:.4">—</span>';
+  solRow.innerHTML=`<span class="hrow-lbl">Solution</span><span class="hrow-val sol">${solStr}</span>`;
+  hci.appendChild(solRow);
+
+  // Players
+  const playRow=document.createElement('div');playRow.className='hrow';
+  playRow.innerHTML=`<span class="hrow-lbl">Players</span><span class="hrow-val" title="${escHtml(playersStr)}">${escHtml(playersStr)}</span>`;
+  hci.appendChild(playRow);
+
+  // Rating
+  const ratRow=document.createElement('div');ratRow.className='hrow';
+  ratRow.innerHTML=`<span class="hrow-lbl">Rating</span><span class="hrow-val">${escHtml(ratingStr)}</span>`;
+  hci.appendChild(ratRow);
+
+  // Move / date
+  const movRow=document.createElement('div');movRow.className='hrow';
+  const dateStr=h.utc_date?h.utc_date.replace(/\./g,'-'):'';
+  movRow.innerHTML=`<span class="hrow-lbl">Move</span><span class="hrow-val">${moveNum} <span style="opacity:.5;font-size:8px">(ply ${h.ply||'?'})</span>${dateStr?` <span style="opacity:.5;font-size:8px">${escHtml(dateStr)}</span>`:''}</span>`;
+  hci.appendChild(movRow);
+
+  // Time control + result
+  if(h.time_control||h.result){
+    const tcRow=document.createElement('div');tcRow.className='hrow';
+    const tcStr=[h.time_control,h.result].filter(Boolean).join(' · ');
+    tcRow.innerHTML=`<span class="hrow-lbl">Game</span><span class="hrow-val">${escHtml(tcStr)}</span>`;
+    hci.appendChild(tcRow);
+  }
+
+  // Source link
+  if(lichessUrl){
+    const lnkRow=document.createElement('div');lnkRow.className='hrow';
+    lnkRow.innerHTML=`<span class="hrow-lbl">Source</span><span class="hrow-val"><a href="${escHtml(lichessUrl)}" target="_blank" onclick="event.stopPropagation()">↗ Lichess</a></span>`;
+    hci.appendChild(lnkRow);
+  }
+
+  hi2.appendChild(hci);
+  card.appendChild(hi2);
+  card.addEventListener('click',()=>toggleHit(h.id));
+  return card;
 }
 
-// ─────────────────────────────────────────────
-// FIELD / SELECTION / EXPORT
-// ─────────────────────────────────────────────
-function setField(f){currentField=f;document.querySelectorAll('.fb').forEach(b=>b.classList.toggle('active',b.textContent.trim()===f));}
+// ── SELECTION / EXPORT ───────────────────────────────────────────────────────
+function toggleHit(id){
+  selectedHits.has(id)?selectedHits.delete(id):selectedHits.add(id);
+  const c=document.getElementById('card_'+cssId(id));
+  if(c){c.classList.toggle('sel',selectedHits.has(id));c.querySelector('.chk').textContent=selectedHits.has(id)?'✓':'';}
+  updateExportBar();
+}
 
-function toggleHit(id){selectedHits.has(id)?selectedHits.delete(id):selectedHits.add(id);const c=document.getElementById(`card_${cssId(id)}`);if(c){c.classList.toggle('sel',selectedHits.has(id));c.querySelector('.chk').textContent=selectedHits.has(id)?'✓':'';}updateExportBar();}
-function clearSelection(){selectedHits.clear();document.querySelectorAll('.hc.sel').forEach(c=>{c.classList.remove('sel');c.querySelector('.chk').textContent='';});updateExportBar();}
-function updateExportBar(){const n=selectedHits.size;document.getElementById('sel-count').textContent=n;document.getElementById('export-btn').disabled=n===0;document.getElementById('sel-hint').textContent=n>0?`(query + ${n} hit${n>1?'s':''})`:''}
-async function exportPGN(){if(!selectedHits.size)return;const ids=[currentQueryId,...selectedHits].filter(Boolean);try{const res=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});if(!res.ok){alert('Export failed');return;}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`ch_export_${Date.now()}.jsonl`;a.click();URL.revokeObjectURL(url);}catch(e){alert('Export error: '+e);}}
+function updateExportBar(){
+  const n=selectedHits.size;
+  document.getElementById('export-btn').style.display=n>0?'block':'none';
+  document.getElementById('sel-count').textContent=n;
+}
 
-// ─────────────────────────────────────────────
-// INIT
-// ─────────────────────────────────────────────
+async function exportLabels(){
+  if(!selectedHits.size)return;
+  const ids=[currentQueryId,...selectedHits].filter(Boolean);
+  try{
+    const res=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+    if(!res.ok){alert('Export failed');return;}
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`ch_export_${Date.now()}.jsonl`;a.click();URL.revokeObjectURL(url);
+  }catch(e){alert('Export error: '+e);}
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded',async()=>{
   await new Promise(resolve=>{
     const s=document.createElement('script');
     s.src='https://cdn.jsdelivr.net/npm/chess.js@0.10.3/chess.min.js';
-    s.onload=resolve;s.onerror=resolve;
-    document.head.appendChild(s);
+    s.onload=resolve;s.onerror=resolve;document.head.appendChild(s);
   });
-
   const startFen='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  applyFen(startFen);
-  document.getElementById('fen-input').value=startFen;
-  initialState = snapshotState('initial');
-  moveHistory=[]; historyIdx=-1;
+  applyFen(startFen);document.getElementById('fen-input').value=startFen;
+  initialState=snapshotState('initial');moveHistory=[];historyIdx=-1;
   renderBoard();renderPockets();renderMoveList();
-
-  try{const res=await fetch('/api/queries');const q=await res.json();document.getElementById('corpus-info').textContent=`${q.length} positions in corpus`;}catch(e){}
-
   document.getElementById('fen-input').addEventListener('keydown',e=>{if(e.key==='Enter')loadFen();});
 });
 
 function escHtml(s){if(s==null)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function escJs(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
 function cssId(s){return String(s).replace(/[^a-zA-Z0-9]/g,'_')}
 </script>
 </body>

@@ -38,9 +38,9 @@ import re
 import pandas as pd
 
 ROOT        = Path(__file__).resolve().parents[1]
-CORPUS      = ROOT / "data" / "derived" / "corpus_mates.jsonl"
-OUT_PARQUET = ROOT / "data" / "derived" / "puzzle_features_mates.parquet"
-OUT_CSV     = ROOT / "data" / "derived" / "puzzle_features_mates.csv"
+CORPUS      = ROOT / "data" / "derived" / "corpus_checkmates5.jsonl"
+OUT_PARQUET = ROOT / "data" / "derived" / "puzzle_features_checkmates5.parquet"
+OUT_CSV     = ROOT / "data" / "derived" / "puzzle_features_checkmates5.csv"
 
 CHUNK_SIZE = 50_000   # flush to disk every N records
 

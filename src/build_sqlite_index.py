@@ -22,8 +22,8 @@ import sqlite3
 import time
 
 ROOT        = Path(__file__).resolve().parents[1]
-CORPUS_PATH = ROOT / "data" / "derived" / "corpus_mates.jsonl"
-DB_PATH     = ROOT / "data" / "derived" / "corpus_mates.db"
+CORPUS_PATH = ROOT / "data" / "derived" / "corpus_checkmates5.jsonl"
+DB_PATH     = ROOT / "data" / "derived" / "corpus_checkmates5.db"
 
 CHUNK_SIZE  = 10_000   # rows per transaction
 

@@ -30,10 +30,10 @@ MIN_PLY     = 6
 # ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parents[1]
-INP  = ROOT / "data" / "derived" / "tactics_full_tactical.jsonl"
+INP  = ROOT / "data" / "derived" / "checkmates5_verified.jsonl"
 
 _OUT_MAP = {
-    "all":        ROOT / "data" / "derived" / "corpus_full.jsonl",
+    "all":        ROOT / "data" / "derived" / "corpus_checkmates5.jsonl",
     "mate":       ROOT / "data" / "derived" / "corpus_mates.jsonl",
     "mate_short": ROOT / "data" / "derived" / "corpus_mates_short.jsonl",
 }
