@@ -720,7 +720,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     s.src='https://cdn.jsdelivr.net/npm/chess.js@0.10.3/chess.min.js';
     s.onload=resolve;s.onerror=resolve;document.head.appendChild(s);
   });
-  const startFen='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  const startFen='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'; //bruh
   applyFen(startFen);document.getElementById('fen-input').value=startFen;
   initialState=snapshotState('initial');moveHistory=[];historyIdx=-1;
   renderBoard();renderPockets();renderMoveList();
