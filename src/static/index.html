@@ -165,6 +165,33 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 .rr-combined-label{font-family:var(--mono);font-size:8px;color:var(--text-dimmer);text-transform:uppercase;letter-spacing:.06em}
 .rr-combined-val{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--accent)}
 .rr-no-results{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:200px;color:var(--text-dimmer);font-family:var(--mono);font-size:12px;text-align:center;width:100%}
+/* ── Expandable / playable hit card ───────────────────────────────────────── */
+.chk{cursor:pointer}
+.chk:hover{border-color:var(--accent)}
+.hc.hc-exp{grid-column:1 / -1;cursor:default;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 6px 24px rgba(0,0,0,.14)}
+.hc.hc-exp:hover{transform:none}
+.hexp{border-top:1px solid var(--border);padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px;cursor:default;background:var(--surface2)}
+.hexp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hexp-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.04em}
+.hexp-hint{font-family:var(--mono);font-size:8px;color:var(--text-dimmer)}
+.hexp-mark{font-family:var(--mono);font-size:9px;font-weight:700;padding:4px 10px;border-radius:5px;cursor:pointer;border:1px solid var(--accent-green);background:transparent;color:var(--accent-green);transition:all .1s;letter-spacing:.03em}
+.hexp-mark.on{background:var(--accent-green);color:#fff}
+.hexp-close{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:700;width:24px;height:24px;border-radius:5px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text-dim)}
+.hexp-body{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.hexp-boardwrap{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
+.hexp-board{position:relative;border:2px solid var(--border);border-radius:4px;overflow:hidden;user-select:none;box-shadow:0 2px 12px rgba(0,0,0,.10)}
+.hexp-pocket{display:flex;align-items:center;gap:3px;flex-wrap:wrap;background:var(--surface3);border:1px solid var(--border);border-radius:6px;padding:3px 6px;min-height:26px}
+.hexp-pocket .plbl{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--text-dimmer);margin-right:2px}
+.hexp-pocket .pp{width:24px;height:24px}
+.hexp-pocket .empty-pocket{font-family:var(--mono);font-size:8px;color:var(--text-dimmer)}
+.hexp-side{flex:1;min-width:180px;display:flex;flex-direction:column;gap:8px}
+.hexp-slider-box{display:flex;flex-direction:column;gap:6px}
+.hexp-slider-lbl{font-family:var(--mono);font-size:8px;font-weight:700;color:var(--text-dimmer);text-transform:uppercase;letter-spacing:.06em}
+.hexp-move{font-family:var(--mono);font-size:11px;color:var(--text);min-height:15px}
+.hexp-move .mv{color:var(--accent);font-weight:700}
+.hexp-navrow{display:flex;align-items:center;gap:4px}
+.hexp-navrow .nav-btn{width:30px;height:26px;font-size:11px}
+.hexp-fen{font-family:var(--mono);font-size:8px;color:var(--text-dimmer);word-break:break-all;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:5px 7px}
 </style>
 </head>
 <body>
@@ -735,9 +762,12 @@ async function doSearch(){
     currentQueryId=data.query.id;
     lastQueryFen=fen;   // ← store so export can include it
     selectedHits.clear();
-    lastHits=data.hits||[];
+    lastHits=data.hits||[];   // keep BM25 order intact — re-rank tab + export rely on it
     rrLabels={};
-    renderHits(lastHits);
+    // TEMP (unbiased expert eval): render search-tab hits in a fresh random order on every
+    // search. Shuffles a COPY only, so lastHits stays in BM25 order and the re-rank tab /
+    // export are untouched. To restore: renderHits(lastHits);
+    renderHits(_shuffle(lastHits.slice()));
     updateExportBar();
     if(activeTab==='rerank')applyRerank();
   }catch(e){
@@ -749,8 +779,12 @@ async function doSearch(){
 function searchByCurrentPosition(){doSearch();}
 
 // ── HITS ──────────────────────────────────────────────────────────────────────
+// TEMP (unbiased expert eval): Fisher-Yates shuffle, non-deterministic each call so the
+// same query produces a different display order every time. Remove when restoring scores.
+function _shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 function renderHits(hits){
   const area=document.getElementById('hits-area');
+  _expandedCardId=null;_origParent=null;_origNextSib=null;   // clear stale expansion state on re-render
   if(!hits||!hits.length){area.innerHTML='<div class="ph"><div class="ico">🤷</div><div>No hits found</div></div>';return;}
   const grid=document.createElement('div');
   grid.className='hg';
@@ -774,6 +808,8 @@ function buildHitCard(h,i){
   const playersStr=h.white&&h.black?`${h.white} vs ${h.black}`:'—';
   const chk=document.createElement('div');
   chk.className='chk';chk.textContent=sel?'✓':'';
+  chk.title='Mark / unmark as similar';
+  chk.addEventListener('click',e=>{e.stopPropagation();toggleHit(h.id);});
   card.appendChild(chk);
   const hi2=document.createElement('div');hi2.className='hi2';
   const hcb=document.createElement('div');hcb.className='hcb';
@@ -787,7 +823,8 @@ function buildHitCard(h,i){
   const hrk=document.createElement('div');hrk.className='hm';
   hrk.innerHTML=`
     <span class="hrk">Hit #${i+1}</span>
-    <span class="hsc">${h.score!=null?h.score.toFixed(2):''}</span>
+    <!-- TEMP: HSC score hidden for unbiased expert eval. Restore line below (and remove this comment): -->
+    <!-- <span class="hsc">\${h.score!=null?h.score.toFixed(2):''}</span> -->
     ${mate!=null?`<span class="badge mate">M${mate}</span>`:''}
     ${hasDrop?'<span class="badge drop">DROP</span>':''}
     ${h.engine_verified?'<span class="badge verified">✓ ENG</span>':''}
@@ -819,8 +856,335 @@ function buildHitCard(h,i){
   }
   hi2.appendChild(hci);
   card.appendChild(hi2);
-  card.addEventListener('click',()=>toggleHit(h.id));
+  card.addEventListener('click',()=>toggleHitExpand(h,card));
   return card;
+}
+
+// ── EXPANDABLE / PLAYABLE HIT ──────────────────────────────────────────────────
+// Click a hit card to expand it in place into a larger, fully playable board (same
+// interaction model as the query board: click a piece then a target, click a pocket
+// piece then an empty square to drop). A slider scrubs through the ACTUAL game moves
+// fetched live from Lichess (with the engine-verified line as an offline fallback).
+// On expand the card is MOVED to the top of the results list (and the list scrolled
+// to the top so it's in view); on close it returns to its original slot and the prior
+// scroll position is restored. Only one card open at a time.
+let _expandedCardId=null, _hitsScrollTop=0, _origParent=null, _origNextSib=null;
+function _hitsAreaEl(){return document.getElementById('hits-area');}
+function _collapseExpanded(restoreScroll){
+  if(!_expandedCardId)return;
+  const card=document.getElementById('card_'+cssId(_expandedCardId));
+  if(card){
+    card.classList.remove('hc-exp');
+    const p=card.querySelector('.hexp');if(p)p.remove();
+    // put the card back exactly where it was in the list
+    if(_origParent){
+      if(_origNextSib&&_origNextSib.parentNode===_origParent)_origParent.insertBefore(card,_origNextSib);
+      else _origParent.appendChild(card);
+    }
+  }
+  _expandedCardId=null;_origParent=null;_origNextSib=null;
+  if(restoreScroll){const ha=_hitsAreaEl();if(ha)ha.scrollTop=_hitsScrollTop;}
+}
+function toggleHitExpand(h,card){
+  if(card.classList.contains('hc-exp')){_collapseExpanded(true);return;} // close the open one → restore slot + scroll
+  const freshOpen=!_expandedCardId;        // nothing was open before this click
+  _collapseExpanded(false);                // collapse any other card (returns it to its slot), keep scroll
+  if(freshOpen){const ha=_hitsAreaEl();if(ha)_hitsScrollTop=ha.scrollTop;} // remember scroll to return to
+  // remember this card's slot, then move it to the very top of the results list
+  _origParent=card.parentNode;
+  _origNextSib=card.nextSibling;
+  if(_origParent)_origParent.insertBefore(card,_origParent.firstChild);
+  card.classList.add('hc-exp');
+  _expandedCardId=h.id;
+  card.appendChild(buildHitExpansion(h));
+  // the card is now first in the list — scroll to the top so it's fully in view
+  const ha=_hitsAreaEl();if(ha)ha.scrollTop=0;
+}
+
+function buildHitExpansion(h){
+  const wrap=document.createElement('div');
+  wrap.className='hexp';
+  wrap.addEventListener('click',e=>e.stopPropagation()); // don't collapse when interacting
+
+  // header: title, mark-similar toggle, close
+  const head=document.createElement('div');head.className='hexp-head';
+  const title=document.createElement('div');title.className='hexp-title';title.textContent='Explore position';
+  const mark=document.createElement('button');
+  mark.className='hexp-mark'+(selectedHits.has(h.id)?' on':'');
+  mark.id='hexp-mark_'+cssId(h.id);
+  mark.textContent=selectedHits.has(h.id)?'✓ Marked similar':'Mark as similar';
+  mark.addEventListener('click',e=>{e.stopPropagation();toggleHit(h.id);});
+  const close=document.createElement('button');close.className='hexp-close';close.textContent='✕';
+  close.title='Collapse';
+  close.addEventListener('click',e=>{e.stopPropagation();_collapseExpanded(true);});
+  head.appendChild(title);head.appendChild(mark);head.appendChild(close);
+  wrap.appendChild(head);
+
+  const body=document.createElement('div');body.className='hexp-body';
+  wrap.appendChild(body);
+
+  // mount the interactive board
+  new HitBoard(h, body);
+  return wrap;
+}
+
+// Self-contained playable board for one expanded hit. Independent state + its own
+// chess.js instance for legality, so it never touches the query board or re-rank tab.
+function HitBoard(h, mountEl){
+  const SQ=38;
+  // states: array of {fen, label, isPuzzle}. Built from the real game once fetched.
+  let states=[], curIdx=0, puzzleIdx=0, maxIdx=0;
+  let st=_stateFromHit(h);           // initial placeholder = the hit position itself
+  let freePlay=false;
+  let selSq=null, selPocket=null, legal=[];
+  let chess=null; try{if(window.Chess)chess=new Chess();}catch(e){}
+
+  // ---- layout ----
+  const boardWrap=document.createElement('div');boardWrap.className='hexp-boardwrap';
+  const pocketTop=document.createElement('div');pocketTop.className='hexp-pocket';   // black
+  const boardEl=document.createElement('div');boardEl.className='hexp-board';
+  boardEl.style.cssText=`width:${SQ*8}px;height:${SQ*8}px`;
+  const pocketBot=document.createElement('div');pocketBot.className='hexp-pocket';   // white
+  boardWrap.appendChild(pocketTop);boardWrap.appendChild(boardEl);boardWrap.appendChild(pocketBot);
+
+  const side=document.createElement('div');side.className='hexp-side';
+  const sliderBox=document.createElement('div');sliderBox.className='hexp-slider-box';
+  const sLbl=document.createElement('div');sLbl.className='hexp-slider-lbl';
+  sLbl.textContent='Loading game…';
+  const statusEl=document.createElement('div');statusEl.className='hexp-hint';statusEl.textContent='Fetching the actual game from Lichess…';
+  const moveTxt=document.createElement('div');moveTxt.className='hexp-move';
+  const slider=document.createElement('input');slider.type='range';slider.min='0';slider.max='0';slider.value='0';slider.disabled=true;
+  const navRow=document.createElement('div');navRow.className='hexp-navrow';
+  const bStart=_navBtn('⇤','First move'),bPrev=_navBtn('←','Prev'),bNext=_navBtn('→','Next'),bEnd=_navBtn('⇥','Last move');
+  const bHit=document.createElement('button');bHit.className='nav-btn';bHit.textContent='⊙';bHit.title='Jump to the hit position';bHit.style.marginLeft='auto';bHit.style.fontSize='13px';
+  navRow.appendChild(bStart);navRow.appendChild(bPrev);navRow.appendChild(bNext);navRow.appendChild(bEnd);navRow.appendChild(bHit);
+  sliderBox.appendChild(sLbl);sliderBox.appendChild(statusEl);sliderBox.appendChild(moveTxt);sliderBox.appendChild(slider);sliderBox.appendChild(navRow);
+  const fenBox=document.createElement('div');fenBox.className='hexp-fen';
+  side.appendChild(sliderBox);side.appendChild(fenBox);
+
+  mountEl.appendChild(boardWrap);mountEl.appendChild(side);
+
+  // ---- state / slider helpers ----
+  function _loadFen(fen){const p=parseCrazyhouseFen(fen);return{board:p.board,pockets:p.pockets,turn:p.turn,castling:p.castling,enPassant:p.enPassant,halfMove:p.halfMove,fullMove:p.fullMove};}
+  function setStates(arr,startIdx,puzzleI){
+    states=arr;maxIdx=Math.max(0,states.length-1);
+    puzzleIdx=Math.max(0,Math.min(maxIdx,(puzzleI==null?startIdx:puzzleI)));
+    slider.max=String(maxIdx);slider.disabled=(maxIdx===0);
+    bHit.style.display=states.some(s=>s.isPuzzle)?'':'none';
+    gotoIdx(startIdx);
+  }
+  function gotoIdx(i){
+    curIdx=Math.max(0,Math.min(maxIdx,i));
+    if(states.length)st=_loadFen(states[curIdx].fen);
+    freePlay=false;selSq=null;selPocket=null;legal=[];
+    slider.value=String(curIdx);
+    render();
+  }
+  function moveLabel(){
+    if(freePlay)return '<span style="color:var(--text-dimmer)">free play — move the slider to return to the game</span>';
+    const s=states[curIdx]||{};
+    const tag=(curIdx===puzzleIdx&&s.isPuzzle)?' <span class="mv">● hit position</span>':'';
+    if(curIdx===0)return '<span style="color:var(--text-dimmer)">starting position</span>'+tag;
+    return `${escHtml(s.label||('move '+curIdx))}${tag}`;
+  }
+  function _plyLabel(ply){const f=Math.ceil(ply/2);return f+(ply%2===1?'.':'…');}
+
+  // start with a single-frame placeholder (the hit position) so the board shows instantly
+  setStates([{fen:_fenOf(st),label:'hit position',isPuzzle:true}],0,0);
+
+  // fetch the real game and rebuild the slider over the full actual move list
+  if(h.site){
+    fetch('/api/game_replay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({site:h.site,board_fen:h.board_fen})})
+      .then(r=>r.json()).then(data=>{
+        if(data.error||!Array.isArray(data.plies)||!data.plies.length){
+          const why=data.status?`${data.error} (HTTP ${data.status})`:(data.error||'no moves returned');
+          _fallbackToRecorded(`Couldn't load the game from Lichess: ${why}. Showing the engine-verified line instead.`);
+          return;
+        }
+        const arr=data.plies.map(p=>({fen:p.fen,label:p.san?`${_plyLabel(p.ply)} ${p.san}`:'start',isPuzzle:false}));
+        const sIdx=Math.max(0,Math.min(arr.length-1,data.start_idx||0));
+        arr[sIdx].isPuzzle=true;
+        sLbl.textContent=`Actual game — ${arr.length-1} moves played`;
+        statusEl.innerHTML='Real moves from the game · <span class="mv">⊙</span> jumps to the hit position';
+        setStates(arr,sIdx,sIdx);
+      })
+      .catch(()=>{ _fallbackToRecorded('Network error contacting the server for the game. Showing the engine-verified line instead.'); });
+  }else{
+    _fallbackToRecorded('No game link stored for this hit. Showing the engine-verified line instead.');
+  }
+
+  // fallback: the engine-verified solution line (what was here before), so the board
+  // still works without internet. Clearly labelled as not the real played moves.
+  function _fallbackToRecorded(msg){
+    const sol=Array.isArray(h.solution_uci)?h.solution_uci.filter(Boolean):[];
+    const solSan=Array.isArray(h.solution_san)?h.solution_san:[];
+    let cur=_stateFromHit(h);
+    const arr=[{fen:_fenOf(cur),label:'hit position',isPuzzle:true}];
+    for(let k=0;k<sol.length;k++){
+      try{cur=_applyUci(cur,sol[k]);arr.push({fen:_fenOf(cur),label:`engine move ${k+1}: ${escHtml(solSan[k]||sol[k])}`,isPuzzle:false});}
+      catch(e){break;}
+    }
+    sLbl.textContent=sol.length?`Engine-verified line (${sol.length} moves)`:'Hit position';
+    statusEl.textContent=msg;
+    setStates(arr,0,0);
+  }
+
+  function syncLegality(){
+    if(!chess)return;
+    try{chess.load(_stdFen(st));}catch(e){}
+  }
+  function legalTargetsFor(r,c){
+    if(!chess)return[];
+    try{return chess.moves({square:sqName(r,c),verbose:true}).map(m=>sqIdx(m.to));}catch(e){return[];}
+  }
+  function legalDropSquares(){
+    const out=[];
+    for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+      if(st.board[r][c])continue;
+      if(selPocket&&selPocket.piece==='P'&&(r===0||r===7))continue;
+      out.push({r,c});
+    }
+    return out;
+  }
+  function onSquare(r,c){
+    if(selPocket){
+      if(legal.some(t=>t.r===r&&t.c===c)){st=_applyUci(st,selPocket.piece+'@'+sqName(r,c));freePlay=true;}
+      selPocket=null;selSq=null;legal=[];render();return;
+    }
+    if(selSq){
+      if(legal.some(t=>t.r===r&&t.c===c)){st=_applyUci(st,sqName(selSq.r,selSq.c)+sqName(r,c));freePlay=true;selSq=null;legal=[];render();return;}
+      if(selSq.r===r&&selSq.c===c){selSq=null;legal=[];render();return;}
+      selSq=null;legal=[];
+    }
+    const p=st.board[r][c];
+    if(p&&p.color===st.turn){selSq={r,c};legal=legalTargetsFor(r,c);}
+    render();
+  }
+  function onPocket(color,piece){
+    if(color!==st.turn)return;
+    if((st.pockets[color][piece]||0)<=0)return;
+    selSq=null;
+    if(selPocket&&selPocket.color===color&&selPocket.piece===piece){selPocket=null;legal=[];render();return;}
+    selPocket={color,piece};legal=legalDropSquares();render();
+  }
+  function render(){
+    syncLegality();
+    // board
+    boardEl.innerHTML='';
+    const legalSet={};
+    for(const t of legal)legalSet[t.r*8+t.c]=st.board[t.r][t.c]?'cap':'dot';
+    for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+      const isLight=(r+c)%2===0;
+      const div=document.createElement('div');
+      div.className='sq '+(isLight?'light':'dark');
+      if(selSq&&selSq.r===r&&selSq.c===c)div.classList.add('selected');
+      const lt=legalSet[r*8+c];
+      if(lt==='dot')div.classList.add('legal-dot');
+      if(lt==='cap')div.classList.add('legal-cap');
+      div.style.cssText=`position:absolute;left:${c*SQ}px;top:${r*SQ}px;width:${SQ}px;height:${SQ}px`;
+      const p=st.board[r][c];
+      if(p){const img=document.createElement('img');img.className='piece-img';img.src=pieceUrl(p.color,p.type);img.draggable=false;div.appendChild(img);}
+      if(c===0){const co=document.createElement('span');co.className='coord rank'+(isLight?'':' on-dark');co.textContent=8-r;div.appendChild(co);}
+      if(r===7){const co=document.createElement('span');co.className='coord file'+(isLight?'':' on-dark');co.textContent=String.fromCharCode(97+c);div.appendChild(co);}
+      div.addEventListener('click',()=>onSquare(r,c));
+      boardEl.appendChild(div);
+    }
+    renderPocket(pocketTop,'b');
+    renderPocket(pocketBot,'w');
+    moveTxt.innerHTML=moveLabel();
+    fenBox.textContent=_fenOf(st);
+    const atStart=(!freePlay&&curIdx===0),atEnd=(!freePlay&&curIdx===maxIdx);
+    bStart.disabled=atStart;bPrev.disabled=atStart;bNext.disabled=atEnd;bEnd.disabled=atEnd;
+  }
+  function renderPocket(el,color){
+    let html=`<span class="plbl">${color==='w'?'W':'B'}</span>`;let any=false;
+    for(const pc of PKS){
+      const n=st.pockets[color][pc]||0;
+      if(n>0){any=true;
+        const isSel=selPocket&&selPocket.color===color&&selPocket.piece===pc;
+        html+=`<span class="pp ${color==='w'?'pw':'pb'}${isSel?' pocket-sel':''}" data-color="${color}" data-piece="${pc}" title="Drop ${pc}">${pieceImg(color,pc,'piece-img')}${n>1?`<span class="pp-count">${n}</span>`:''}</span>`;
+      }
+    }
+    if(!any)html+='<span class="empty-pocket">—</span>';
+    el.innerHTML=html;
+    el.querySelectorAll('.pp').forEach(pp=>pp.addEventListener('click',()=>onPocket(pp.dataset.color,pp.dataset.piece)));
+  }
+  function _navBtn(txt,title){const b=document.createElement('button');b.className='nav-btn';b.textContent=txt;b.title=title;return b;}
+
+  // ---- wire controls ----
+  slider.addEventListener('input',()=>gotoIdx(parseInt(slider.value)));
+  bStart.addEventListener('click',()=>gotoIdx(0));
+  bPrev.addEventListener('click',()=>gotoIdx(curIdx-1));
+  bNext.addEventListener('click',()=>gotoIdx(curIdx+1));
+  bEnd.addEventListener('click',()=>gotoIdx(maxIdx));
+  bHit.addEventListener('click',()=>gotoIdx(puzzleIdx));
+}
+
+// ── state utilities for HitBoard (operate on plain state objects) ───────────────
+function _stateFromHit(h){
+  const p=parseCrazyhouseFen(h.board_fen||'');
+  // turn: prefer the hit's stored turn; else infer from the first non-drop solution move; else white
+  let turn=null;
+  const t=(h.turn||'').toString().toLowerCase();
+  if(t==='w'||t==='white')turn='w';else if(t==='b'||t==='black')turn='b';
+  if(!turn){
+    const sol=Array.isArray(h.solution_uci)?h.solution_uci:[];
+    const firstMove=sol.find(m=>m&&!m.includes('@'));
+    if(firstMove){const f=sqIdx(firstMove.slice(0,2));const pc=p.board[f.r]&&p.board[f.r][f.c];if(pc)turn=pc.color;}
+  }
+  if(!turn)turn='w';
+  // merge pockets parsed from FEN with explicit pocket fields if present
+  const pk={w:{...p.pockets.w},b:{...p.pockets.b}};
+  _mergePocket(pk.w,h.pockets_white);_mergePocket(pk.b,h.pockets_black);
+  return{board:p.board,pockets:pk,turn,castling:p.castling||'-',enPassant:p.enPassant||'-',halfMove:p.halfMove||0,fullMove:p.fullMove||1};
+}
+function _mergePocket(dst,src){
+  if(!src||typeof src!=='object')return;
+  for(const pc of PKS){if(src[pc]!=null)dst[pc]=src[pc];}
+}
+function _cloneState(s){
+  return{board:s.board.map(r=>r.map(c=>c?{...c}:null)),
+    pockets:{w:{...s.pockets.w},b:{...s.pockets.b}},
+    turn:s.turn,castling:s.castling,enPassant:s.enPassant,halfMove:s.halfMove,fullMove:s.fullMove};
+}
+function _stdFen(s){
+  let out='';
+  for(let r=0;r<8;r++){let e=0;for(let c=0;c<8;c++){const p=s.board[r][c];if(!p)e++;else{if(e){out+=e;e=0;}out+=p.color==='w'?p.type:p.type.toLowerCase();}}if(e)out+=e;if(r<7)out+='/';}
+  return`${out} ${s.turn} ${s.castling||'-'} ${s.enPassant||'-'} ${s.halfMove||0} ${s.fullMove||1}`;
+}
+function _fenOf(s){
+  const base=_stdFen(s);
+  const wP=PKS.flatMap(p=>Array(s.pockets.w[p]||0).fill(p)).join('');
+  const bP=PKS.flatMap(p=>Array(s.pockets.b[p]||0).fill(p.toLowerCase())).join('');
+  const pocket=wP+bP;if(!pocket)return base;
+  const parts=base.split(' ');parts[0]=parts[0]+'/'+pocket;return parts.join(' ');
+}
+// apply one UCI move/drop to a state, returning a NEW state (Crazyhouse-aware)
+function _applyUci(s0,uci){
+  const s=_cloneState(s0);const color=s.turn;
+  if(uci.includes('@')){
+    const piece=uci[0].toUpperCase();const sq=sqIdx(uci.slice(2,4));
+    s.board[sq.r][sq.c]={color,type:piece};
+    if((s.pockets[color][piece]||0)>0)s.pockets[color][piece]--;
+    s.turn=color==='w'?'b':'w';if(s.turn==='w')s.fullMove++;s.halfMove=0;return s;
+  }
+  const from=sqIdx(uci.slice(0,2)),to=sqIdx(uci.slice(2,4));
+  const promo=uci.length>4?uci[4].toUpperCase():null;
+  const piece=s.board[from.r][from.c];
+  if(!piece)return s;
+  const captured=s.board[to.r][to.c];
+  if(captured){const pt=captured.type==='K'?'Q':captured.type;s.pockets[color][pt]=(s.pockets[color][pt]||0)+1;}
+  let epCap=false;
+  if(piece.type==='P'&&from.c!==to.c&&!captured){epCap=true;s.board[from.r][to.c]=null;s.pockets[color]['P']=(s.pockets[color]['P']||0)+1;}
+  s.board[to.r][to.c]=piece;s.board[from.r][from.c]=null;
+  if(piece.type==='P'&&(to.r===0||to.r===7))s.board[to.r][to.c]={color,type:promo||'Q'};
+  if(piece.type==='K'&&Math.abs(to.c-from.c)===2){
+    if(to.c===6){s.board[to.r][5]=s.board[to.r][7];s.board[to.r][7]=null;}
+    if(to.c===2){s.board[to.r][3]=s.board[to.r][0];s.board[to.r][0]=null;}
+  }
+  s.turn=color==='w'?'b':'w';if(s.turn==='w')s.fullMove++;
+  s.halfMove=(piece.type==='P'||captured||epCap)?0:s.halfMove+1;
+  return s;
 }
 
 // ── SELECTION / EXPORT ────────────────────────────────────────────────────────
@@ -828,6 +1192,8 @@ function toggleHit(id){
   selectedHits.has(id)?selectedHits.delete(id):selectedHits.add(id);
   const c=document.getElementById('card_'+cssId(id));
   if(c){c.classList.toggle('sel',selectedHits.has(id));c.querySelector('.chk').textContent=selectedHits.has(id)?'✓':'';}
+  const mk=document.getElementById('hexp-mark_'+cssId(id));
+  if(mk){const on=selectedHits.has(id);mk.classList.toggle('on',on);mk.textContent=on?'✓ Marked similar':'Mark as similar';}
   updateExportBar();
 }
 

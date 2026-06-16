@@ -497,6 +497,122 @@ def search_by_fen():
     })
 
 
+# ---------------------------------------------------------------------------
+# Full-game replay (fetch the ACTUAL played game from Lichess)
+# ---------------------------------------------------------------------------
+# The verified corpus stores the engine's optimal mate line in solution_uci, not
+# the moves the players actually made. To show the real game on the hit board we
+# fetch the original PGN from Lichess and replay it with python-chess (which fully
+# supports Crazyhouse, including drops), returning one FEN per ply. Cached per id.
+_GAME_REPLAY_CACHE: dict = {}
+
+
+def _lichess_game_id(site: str) -> str | None:
+    """Extract the 8-char Lichess game id from a Site URL/string."""
+    if not site:
+        return None
+    m = re.search(r"lichess\.org/(\w{8})", site)
+    return m.group(1) if m else None
+
+
+@app.route("/api/game_replay", methods=["POST"])
+def game_replay():
+    import chess
+    import chess.pgn
+
+    data      = request.get_json(force=True) or {}
+    site      = (data.get("site") or "").strip()
+    want_fen  = (data.get("board_fen") or "").strip()
+    gid       = _lichess_game_id(site)
+    if not gid:
+        return jsonify({"error": "no_game_id"}), 400
+
+    rep = _GAME_REPLAY_CACHE.get(gid)
+    if rep is None:
+        import ssl
+        import urllib.error
+        url = (f"https://lichess.org/game/export/{gid}"
+               "?evals=false&clocks=false&literate=false")
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/x-chess-pgn",
+                     "User-Agent": "crazyhouse-tactical-retrieval/thesis (mate-motif research)"},
+        )
+
+        def _fetch(ctx):
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                return r.read().decode("utf-8", "replace")
+
+        # Build a verified context (prefer certifi's CA bundle — many Windows Python
+        # installs lack a working system store, which is the usual cause of a 502 here).
+        try:
+            import certifi
+            verified_ctx = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            verified_ctx = ssl.create_default_context()
+
+        pgn_text = None
+        try:
+            pgn_text = _fetch(verified_ctx)
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                pass
+            return jsonify({"error": "fetch_failed", "status": e.code,
+                            "detail": str(e), "body": body, "url": url}), 502
+        except ssl.SSLError:
+            # CA store can't verify lichess.org — retry once without verification.
+            # The data is public, read-only game PGNs over a localhost tool, so this
+            # is an acceptable fallback. Install certifi to keep verification on.
+            try:
+                pgn_text = _fetch(ssl._create_unverified_context())
+            except Exception as e2:
+                return jsonify({"error": "fetch_failed", "detail": repr(e2),
+                                "url": url, "note": "TLS verification failed; "
+                                "try `pip install certifi`"}), 502
+        except Exception as e:
+            return jsonify({"error": "fetch_failed", "detail": repr(e), "url": url}), 502
+
+        try:
+            game = chess.pgn.read_game(io.StringIO(pgn_text))
+            if game is None:
+                return jsonify({"error": "parse_failed",
+                                "body": (pgn_text or "")[:300], "url": url}), 502
+            board = game.board()  # CrazyhouseBoard when [Variant "Crazyhouse"] present
+            plies = [{"ply": 0, "uci": None, "san": None, "fen": board.fen()}]
+            for i, mv in enumerate(game.mainline_moves(), start=1):
+                san = board.san(mv)
+                board.push(mv)
+                plies.append({"ply": i, "uci": mv.uci(), "san": san, "fen": board.fen()})
+        except Exception as e:
+            return jsonify({"error": "replay_failed", "detail": repr(e)}), 502
+
+        rep = {
+            "game_id": gid,
+            "variant": game.headers.get("Variant", ""),
+            "white":   game.headers.get("White"),
+            "black":   game.headers.get("Black"),
+            "result":  game.headers.get("Result"),
+            "plies":   plies,
+        }
+        _GAME_REPLAY_CACHE[gid] = rep
+
+    # locate the ply whose board matches the hit position so the slider can default there
+    start_idx = 0
+    if want_fen:
+        wf = want_fen.split(" ")[0].split("[")[0]
+        for p in rep["plies"]:
+            if p["fen"].split(" ")[0].split("[")[0] == wf:
+                start_idx = p["ply"]
+                break
+
+    out = dict(rep)
+    out["start_idx"] = start_idx
+    return jsonify(out)
+
+
 @app.route("/api/rerank_search", methods=["POST"])
 def rerank_search():
     """
