@@ -11,9 +11,12 @@ from pathlib import Path
 from collections import Counter
 import json
 import io
+import os
+import platform
 import re
 import time
 import threading
+import traceback
 import urllib.parse
 import urllib.request
 
@@ -33,13 +36,66 @@ ASSETS_DIR = BASE_DIR.parent / "assets"
 LUCENE_URL = "http://localhost:8983"
 CACHE_DIR  = BASE_DIR.parent / "data" / "models"
 
-# Path to Fairy-Stockfish binary — adjust if yours is elsewhere
-ENGINE_PATH = str(BASE_DIR.parent / "engines" / "fairy-stockfish-largeboard_x86-64.exe")
-if not Path(ENGINE_PATH).exists():
-    # Try common Windows name
-    _alt = BASE_DIR.parent / "engine" / "fairy-stockfish.exe"
-    if _alt.exists():
-        ENGINE_PATH = str(_alt)
+# Fairy-Stockfish binary. All builds live in crazyhouse/engines/ ; the right one
+# is chosen by OS (and CPU arch). Drop in the binary for each platform you deploy on,
+# or set the FAIRY_STOCKFISH env var to point at a specific file (that always wins).
+ENGINES_DIR = BASE_DIR / "engines"
+
+def _engine_filenames() -> list[str]:
+    """Candidate binary names for the current OS / architecture, best first."""
+    system  = platform.system()           # 'Windows' | 'Linux' | 'Darwin'
+    machine = platform.machine().lower()   # 'x86_64' | 'amd64' | 'aarch64' | 'arm64' | 'armv7l' ...
+    is_arm64 = machine in ("aarch64", "arm64")
+    is_arm32 = machine.startswith("arm") and not is_arm64
+
+    if system == "Windows":
+        return [
+            "fairy-stockfish-largeboard_x86-64.exe",
+            "fairy-stockfish-largeboard.exe",
+            "fairy-stockfish.exe",
+        ]
+    if system == "Darwin":                 # macOS
+        if is_arm64:
+            return [
+                "fairy-stockfish-largeboard_apple-silicon",
+                "fairy-stockfish-largeboard_arm64",
+                "fairy-stockfish-largeboard_x86-64",   # runs under Rosetta as a fallback
+                "fairy-stockfish",
+            ]
+        return ["fairy-stockfish-largeboard_x86-64", "fairy-stockfish"]
+    # Linux / other POSIX
+    if is_arm64:
+        return [
+            "fairy-stockfish-largeboard_arm",
+            "fairy-stockfish-largeboard_aarch64",
+            "fairy-stockfish-largeboard_armv8",
+            "fairy-stockfish",
+        ]
+    if is_arm32:
+        return [
+            "fairy-stockfish-largeboard_armv7",
+            "fairy-stockfish-largeboard_arm",
+            "fairy-stockfish",
+        ]
+    return [                                # x86-64 / amd64
+        "fairy-stockfish-largeboard_x86-64",
+        "fairy-stockfish-largeboard_bmi2",
+        "fairy-stockfish",
+    ]
+
+def _resolve_engine_path() -> str:
+    env = os.environ.get("FAIRY_STOCKFISH")
+    if env and Path(env).exists():
+        return env
+    for name in _engine_filenames():
+        p = ENGINES_DIR / name
+        if p.exists():
+            return str(p)
+    # not found — return the preferred name so the error message is useful
+    return str(ENGINES_DIR / _engine_filenames()[0])
+
+ENGINE_PATH = _resolve_engine_path()
+print(f"Engine path ({platform.system()}/{platform.machine()}): {ENGINE_PATH}")
 
 # ---------------------------------------------------------------------------
 # Lucene client
@@ -109,6 +165,13 @@ def _get_engine():
         return None
 
     try:
+        if os.name != "nt":
+            # ensure the binary is executable (a fresh git checkout often loses +x)
+            try:
+                st = os.stat(engine_bin)
+                os.chmod(engine_bin, st.st_mode | 0o111)
+            except Exception:
+                pass
         from engine_wrapper import FairyStockfish
         _engine = FairyStockfish(str(engine_bin))
         _engine_ok = True
@@ -615,6 +678,18 @@ def game_replay():
 
 @app.route("/api/rerank_search", methods=["POST"])
 def rerank_search():
+    try:
+        return _rerank_search_impl()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            "error": f"{type(e).__name__}: {e}",
+            "where": "rerank_search",
+            "trace": traceback.format_exc().splitlines()[-8:],
+        }), 500
+
+
+def _rerank_search_impl():
     """
     Full re-rank pipeline:
       1. Run Fairy-Stockfish on the query FEN (~1-2 sec)
@@ -991,20 +1066,29 @@ def rerank():
 def export_labels():
     data = request.get_json()
 
+    # Per-candidate label map: candidate_id -> "similar" | "different".
+    # Anything not present is treated as unmarked ("").
+    labels_map = dict(data.get("labels") or {})
+
     # Support both payload formats:
-    # 1. {all_hit_ids, similar_ids, query_fen, query_id}  ← new format (export all with 0/1 labels)
-    # 2. {ids}                                             ← legacy format (all selected = label 1)
+    # 1. {all_hit_ids, labels, query_fen, query_id}        ← current format (explicit string labels)
+    #    (also accepts the older {similar_ids:[...]} as a fallback meaning "similar")
+    # 2. {ids}                                             ← legacy format (all selected = similar)
     if "ids" in data:
         ids         = data["ids"]
         query_id    = ids[0] if ids else ""
         all_hit_ids = ids[1:]
-        similar_ids = set(all_hit_ids)   # legacy: everything passed in = similar
         query_fen   = data.get("query_fen", "")
+        for hid in all_hit_ids:
+            labels_map.setdefault(hid, "similar")   # legacy: everything passed in = similar
     else:
         query_id    = data.get("query_id", "")
         query_fen   = data.get("query_fen", "")
-        similar_ids = set(data.get("similar_ids", []))
         all_hit_ids = data.get("all_hit_ids", [])
+        # backward-compat: a bare similar_ids list (no explicit labels map) still means "similar"
+        if not labels_map:
+            for hid in data.get("similar_ids", []):
+                labels_map[hid] = "similar"
 
     if not all_hit_ids:
         return jsonify({"error": "no hits provided"}), 400
@@ -1014,10 +1098,13 @@ def export_labels():
 
     for rank, hit_id in enumerate(all_hit_ids, start=1):
         h_doc = _lucene_doc(hit_id) or {}
+        lab   = labels_map.get(hit_id, "")
+        if lab not in ("similar", "different"):
+            lab = ""                       # explicit: unmarked is "", NOT "different"
         record = {
             "query_id":               query_id,
             "candidate_id":           hit_id,
-            "label":                  1 if hit_id in similar_ids else 0,
+            "label":                  lab,   # "similar" | "different" | ""
             "bm25_rank":              rank,
             # query_fen: prefer the live FEN from the frontend over the stored doc FEN
             "query_fen":              query_fen or (q_doc.get("board_fen") if q_doc else ""),

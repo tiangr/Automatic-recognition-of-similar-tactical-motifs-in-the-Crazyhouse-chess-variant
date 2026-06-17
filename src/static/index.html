@@ -79,9 +79,11 @@ main{display:flex;flex-direction:column;overflow:hidden}
 .hg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .hc{background:var(--surface);border:1.5px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer;position:relative;transition:border-color .12s,transform .12s,box-shadow .12s}
 .hc:hover{border-color:var(--text-dimmer);transform:translateY(-1px);box-shadow:0 4px 18px rgba(0,0,0,.10)}
-.hc.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.chk{position:absolute;top:8px;right:8px;width:18px;height:18px;border-radius:50%;border:2px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:10px;z-index:3;transition:all .12s}
-.hc.sel .chk{background:var(--accent);border-color:var(--accent);color:#fff}
+.hc.lbl-sim{border-color:var(--accent-green);box-shadow:0 0 0 1px var(--accent-green)}
+.hc.lbl-diff{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.chk{position:absolute;top:8px;right:8px;width:18px;height:18px;border-radius:50%;border:2px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;z-index:3;transition:all .12s}
+.hc.lbl-sim .chk{background:var(--accent-green);border-color:var(--accent-green);color:#fff}
+.hc.lbl-diff .chk{background:var(--accent);border-color:var(--accent);color:#fff}
 .hi2{display:flex;align-items:stretch}
 .hcb{padding:4px 3px 4px 5px;flex-shrink:0;display:flex;flex-direction:row;gap:2px;align-items:center}
 .pocket-side{display:flex;flex-direction:column;gap:1px;justify-content:center;width:14px}
@@ -101,6 +103,12 @@ main{display:flex;flex-direction:column;overflow:hidden}
 .hrow-val.sol{color:var(--accent2);white-space:normal;line-height:1.5;word-break:break-word}
 .hrow-val.sol .bm{color:var(--accent);font-weight:700}
 .hrow-val a{color:var(--accent2);text-decoration:none}.hrow-val a:hover{text-decoration:underline}
+.hc-mark-row{display:flex;gap:4px;margin-top:4px}
+.hc-mark-btn{font-family:var(--mono);font-size:8px;font-weight:700;padding:3px 7px;border-radius:5px;cursor:pointer;background:transparent;transition:all .1s;letter-spacing:.03em;flex:1}
+.hc-mark-btn.sim{border:1px solid var(--accent-green);color:var(--accent-green)}
+.hc-mark-btn.sim:hover,.hc-mark-btn.sim.on{background:var(--accent-green);color:#fff}
+.hc-mark-btn.diff{border:1px solid var(--accent);color:var(--accent)}
+.hc-mark-btn.diff:hover,.hc-mark-btn.diff.on{background:var(--accent);color:#fff}
 canvas{display:block;image-rendering:pixelated}
 .ph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:100%;color:var(--text-dimmer);font-family:var(--mono);font-size:12px;text-align:center}
 .ico{font-size:34px;opacity:.22}
@@ -156,6 +164,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 .rr-match-fill.flag{background:#7c3aed}
 .rr-match-pct{font-family:var(--mono);font-size:8px;color:var(--text-dim);width:22px;text-align:right;flex-shrink:0}
 .rr-card-actions{display:flex;gap:4px;margin-top:5px}
+.hc-actions{display:flex;gap:4px;margin-top:6px}
+.hc.hc-exp .hc-actions{display:none}   /* expanded view has its own Mark buttons */
+.hc.hc-exp .chk{display:none}
 .rr-action-btn{flex:1;font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 4px;border-radius:4px;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);transition:all .1s;text-align:center;letter-spacing:.02em}
 .rr-action-btn:hover{border-color:var(--text-dim);color:var(--text)}
 .rr-action-btn.mark-sim{border-color:var(--accent-green);color:var(--accent-green)}
@@ -177,6 +188,8 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 .hexp-hint{font-family:var(--mono);font-size:8px;color:var(--text-dimmer)}
 .hexp-mark{font-family:var(--mono);font-size:9px;font-weight:700;padding:4px 10px;border-radius:5px;cursor:pointer;border:1px solid var(--accent-green);background:transparent;color:var(--accent-green);transition:all .1s;letter-spacing:.03em}
 .hexp-mark.on{background:var(--accent-green);color:#fff}
+.hexp-mark.diff{border-color:var(--accent);color:var(--accent)}
+.hexp-mark.diff.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 .hexp-close{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:700;width:24px;height:24px;border-radius:5px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text-dim)}
 .hexp-body{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
 .hexp-boardwrap{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
@@ -254,7 +267,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
         style="background:var(--accent2);margin-top:4px;display:none">
         ♞ Tactical re-rank search
       </button>
-      <button class="btn-export" id="export-btn" onclick="exportLabels()" style="display:none">↓ Export all (<span id="sel-count">0</span> marked similar)</button>
+      <button class="btn-export" id="export-btn" onclick="exportLabels()" style="display:none">↓ Export all (<span id="sel-count">0 similar, 0 different</span>)</button>
     </div>
   </aside>
 
@@ -396,7 +409,9 @@ let castling='-',enPassant='-',halfMove=0,fullMove=1;
 let chessJS=null;
 let selectedSq=null,selectedPocket=null,legalTargets=[];
 let moveHistory=[],historyIdx=-1,initialState=null;
-let currentQueryId=null,currentField='text_all',selectedHits=new Set();
+let currentQueryId=null,currentField='text_all';
+let hitLabels={};            // id -> 'similar' | 'different'  (absent/'' = unmarked)
+let _activeHitNav=null;      // set while a hit card is expanded → drives ←/→ keys
 let lastHits=[],lastQueryFen='',rrLabelFilter={sim:true,diff:true},rrLabels={};
 let weights={bm25:0.25,tactic:0.30,move:0.25,matingpiece:0.10,first_act:0.05,pvlen:0.05,droppcs:0.00,pocket_sim:0.00,rating:0.00};
 
@@ -870,7 +885,7 @@ async function doSearch(){
     if(data.error){alert(data.error);return;}
     currentQueryId=data.query.id;
     lastQueryFen=fen;   // ← store so export can include it
-    selectedHits.clear();
+    hitLabels={};
     lastHits=data.hits||[];   // keep BM25 order intact — re-rank tab + export rely on it
     rrLabels={};
     // TEMP (unbiased expert eval): render search-tab hits in a fresh random order on every
@@ -901,9 +916,9 @@ function renderHits(hits){
   area.innerHTML='';area.appendChild(grid);
 }
 function buildHitCard(h,i){
-  const sel=selectedHits.has(h.id);
+  const lab=hitLabels[h.id]||'';
   const card=document.createElement('div');
-  card.className='hc'+(sel?' sel':'');
+  card.className='hc'+(lab==='similar'?' lbl-sim':lab==='different'?' lbl-diff':'');
   card.id='card_'+cssId(h.id);
   const SQ_SM=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sq-sm'))||18;
   const moveNum=h.ply?Math.ceil(h.ply/2):'?';
@@ -916,9 +931,9 @@ function buildHitCard(h,i){
   const ratingStr=ratingAvg?`${ratingAvg} avg`:(h.white_elo&&h.black_elo?`${h.white_elo}/${h.black_elo}`:'—');
   const playersStr=h.white&&h.black?`${h.white} vs ${h.black}`:'—';
   const chk=document.createElement('div');
-  chk.className='chk';chk.textContent=sel?'✓':'';
-  chk.title='Mark / unmark as similar';
-  chk.addEventListener('click',e=>{e.stopPropagation();toggleHit(h.id);});
+  chk.className='chk';chk.textContent=lab==='similar'?'✓':lab==='different'?'✗':'';
+  chk.title='Click to cycle: similar → different → unmarked';
+  chk.addEventListener('click',e=>{e.stopPropagation();cycleHitLabel(h.id);});
   card.appendChild(chk);
   const hi2=document.createElement('div');hi2.className='hi2';
   const hcb=document.createElement('div');hcb.className='hcb';
@@ -963,6 +978,18 @@ function buildHitCard(h,i){
     lnkRow.innerHTML=`<span class="hrow-lbl">Source</span><span class="hrow-val"><a href="${escHtml(lichessUrl)}" target="_blank" onclick="event.stopPropagation()">↗ Lichess</a></span>`;
     hci.appendChild(lnkRow);
   }
+  // mark similar / different without expanding the card
+  const actRow=document.createElement('div');actRow.className='hc-actions';
+  const bSim=document.createElement('button');
+  bSim.className='rr-action-btn mark-sim'+(lab==='similar'?' active':'');
+  bSim.id='hc-sim_'+cssId(h.id);bSim.textContent='similar';
+  bSim.addEventListener('click',e=>{e.stopPropagation();setHitLabel(h.id,'similar');});
+  const bDiff=document.createElement('button');
+  bDiff.className='rr-action-btn mark-diff'+(lab==='different'?' active':'');
+  bDiff.id='hc-diff_'+cssId(h.id);bDiff.textContent='different';
+  bDiff.addEventListener('click',e=>{e.stopPropagation();setHitLabel(h.id,'different');});
+  actRow.appendChild(bSim);actRow.appendChild(bDiff);
+  hci.appendChild(actRow);
   hi2.appendChild(hci);
   card.appendChild(hi2);
   card.addEventListener('click',()=>toggleHitExpand(h,card));
@@ -991,7 +1018,7 @@ function _collapseExpanded(restoreScroll){
       else _origParent.appendChild(card);
     }
   }
-  _expandedCardId=null;_origParent=null;_origNextSib=null;
+  _expandedCardId=null;_origParent=null;_origNextSib=null;_activeHitNav=null;
   if(restoreScroll){const ha=_hitsAreaEl();if(ha)ha.scrollTop=_hitsScrollTop;}
 }
 function toggleHitExpand(h,card){
@@ -1010,23 +1037,41 @@ function toggleHitExpand(h,card){
   const ha=_hitsAreaEl();if(ha)ha.scrollTop=0;
 }
 
+// ←/→ (and Home/End) scrub the expanded hit board's move slider, unless the user is
+// typing in a field or the range input itself already has focus (it handles arrows natively).
+document.addEventListener('keydown',e=>{
+  if(!_expandedCardId||!_activeHitNav)return;
+  const t=e.target,tag=t&&t.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(t&&t.isContentEditable))return;
+  if(e.key==='ArrowLeft'){e.preventDefault();_activeHitNav('prev');}
+  else if(e.key==='ArrowRight'){e.preventDefault();_activeHitNav('next');}
+  else if(e.key==='Home'){e.preventDefault();_activeHitNav('start');}
+  else if(e.key==='End'){e.preventDefault();_activeHitNav('end');}
+});
+
 function buildHitExpansion(h){
   const wrap=document.createElement('div');
   wrap.className='hexp';
   wrap.addEventListener('click',e=>e.stopPropagation()); // don't collapse when interacting
 
-  // header: title, mark-similar toggle, close
+  // header: title, mark-similar / mark-different toggles, close
   const head=document.createElement('div');head.className='hexp-head';
   const title=document.createElement('div');title.className='hexp-title';title.textContent='Explore position';
-  const mark=document.createElement('button');
-  mark.className='hexp-mark'+(selectedHits.has(h.id)?' on':'');
-  mark.id='hexp-mark_'+cssId(h.id);
-  mark.textContent=selectedHits.has(h.id)?'✓ Marked similar':'Mark as similar';
-  mark.addEventListener('click',e=>{e.stopPropagation();toggleHit(h.id);});
+  const lab=hitLabels[h.id]||'';
+  const markSim=document.createElement('button');
+  markSim.className='hexp-mark'+(lab==='similar'?' on':'');
+  markSim.id='hexp-sim_'+cssId(h.id);
+  markSim.textContent=lab==='similar'?'✓ Marked similar':'Mark as similar';
+  markSim.addEventListener('click',e=>{e.stopPropagation();setHitLabel(h.id,'similar');});
+  const markDiff=document.createElement('button');
+  markDiff.className='hexp-mark diff'+(lab==='different'?' on':'');
+  markDiff.id='hexp-diff_'+cssId(h.id);
+  markDiff.textContent=lab==='different'?'✗ Marked different':'Mark as different';
+  markDiff.addEventListener('click',e=>{e.stopPropagation();setHitLabel(h.id,'different');});
   const close=document.createElement('button');close.className='hexp-close';close.textContent='✕';
   close.title='Collapse';
   close.addEventListener('click',e=>{e.stopPropagation();_collapseExpanded(true);});
-  head.appendChild(title);head.appendChild(mark);head.appendChild(close);
+  head.appendChild(title);head.appendChild(markSim);head.appendChild(markDiff);head.appendChild(close);
   wrap.appendChild(head);
 
   const body=document.createElement('div');body.className='hexp-body';
@@ -1290,6 +1335,15 @@ function HitBoard(h, mountEl){
   bNext.addEventListener('click',()=>gotoIdx(curIdx+1));
   bEnd.addEventListener('click',()=>gotoIdx(maxIdx));
   bHit.addEventListener('click',()=>gotoIdx(puzzleIdx));
+
+  // expose nav so the ←/→ keys can scrub this board while it's the expanded one
+  _activeHitNav=dir=>{
+    if(dir==='prev')gotoIdx(curIdx-1);
+    else if(dir==='next')gotoIdx(curIdx+1);
+    else if(dir==='start')gotoIdx(0);
+    else if(dir==='end')gotoIdx(maxIdx);
+    else if(dir==='hit')gotoIdx(puzzleIdx);
+  };
 }
 
 // ── state utilities for HitBoard (operate on plain state objects) ───────────────
@@ -1360,29 +1414,57 @@ function _applyUci(s0,uci){
 }
 
 // ── SELECTION / EXPORT ────────────────────────────────────────────────────────
-function toggleHit(id){
-  selectedHits.has(id)?selectedHits.delete(id):selectedHits.add(id);
-  const c=document.getElementById('card_'+cssId(id));
-  if(c){c.classList.toggle('sel',selectedHits.has(id));c.querySelector('.chk').textContent=selectedHits.has(id)?'✓':'';}
-  const mk=document.getElementById('hexp-mark_'+cssId(id));
-  if(mk){const on=selectedHits.has(id);mk.classList.toggle('on',on);mk.textContent=on?'✓ Marked similar':'Mark as similar';}
+// Each hit carries one of three labels: 'similar', 'different', or '' (unmarked).
+function setHitLabel(id,label){
+  // clicking the same label again clears it (back to unmarked)
+  if(hitLabels[id]===label)delete hitLabels[id];else hitLabels[id]=label;
+  _refreshHitLabelUI(id);
   updateExportBar();
+}
+function cycleHitLabel(id){
+  const order=['', 'similar', 'different'];
+  const cur=hitLabels[id]||'';
+  const next=order[(order.indexOf(cur)+1)%order.length];
+  if(next==='')delete hitLabels[id];else hitLabels[id]=next;
+  _refreshHitLabelUI(id);
+  updateExportBar();
+}
+function _refreshHitLabelUI(id){
+  const lab=hitLabels[id]||'';
+  const c=document.getElementById('card_'+cssId(id));
+  if(c){
+    c.classList.toggle('lbl-sim',lab==='similar');
+    c.classList.toggle('lbl-diff',lab==='different');
+    const chk=c.querySelector('.chk');
+    if(chk)chk.textContent=lab==='similar'?'✓':lab==='different'?'✗':'';
+  }
+  const cs=document.getElementById('hc-sim_'+cssId(id));
+  if(cs)cs.classList.toggle('active',lab==='similar');
+  const cd=document.getElementById('hc-diff_'+cssId(id));
+  if(cd)cd.classList.toggle('active',lab==='different');
+  const ms=document.getElementById('hexp-sim_'+cssId(id));
+  if(ms){ms.classList.toggle('on',lab==='similar');ms.textContent=lab==='similar'?'✓ Marked similar':'Mark as similar';}
+  const md=document.getElementById('hexp-diff_'+cssId(id));
+  if(md){md.classList.toggle('on',lab==='different');md.textContent=lab==='different'?'✗ Marked different':'Mark as different';}
 }
 
 function updateExportBar(){
-  const n=selectedHits.size;
-  // Show export button as soon as there are any hits, not just when something is selected
+  let nSim=0,nDiff=0;
+  for(const h of lastHits){const l=hitLabels[h.id];if(l==='similar')nSim++;else if(l==='different')nDiff++;}
   document.getElementById('export-btn').style.display=lastHits.length?'block':'none';
-  document.getElementById('sel-count').textContent=n;
+  const c=document.getElementById('sel-count');if(c)c.textContent=`${nSim} similar, ${nDiff} different`;
 }
 
 async function exportLabels(){
   if(!lastHits.length)return;
+  // send an explicit per-hit label map; backend writes "similar" / "different" / ""
+  const labels={};
+  for(const h of lastHits){if(hitLabels[h.id])labels[h.id]=hitLabels[h.id];}
   const payload={
     query_id:    currentQueryId||'',
-    query_fen:   lastQueryFen,         // ← the FEN that was searched
+    query_fen:   lastQueryFen,         // the FEN that was searched
     all_hit_ids: lastHits.map(h=>h.id),
-    similar_ids: [...selectedHits],    // ← label=1; everything else gets label=0
+    labels:      labels,               // id -> "similar" | "different"; missing = ""
   };
   try{
     const res=await fetch('/api/export',{
@@ -1634,7 +1716,8 @@ function _renderRerankCards(scored){
 
 function setRrLabel(id,lbl){
   if(lbl===null)delete rrLabels[id];else rrLabels[id]=lbl;
-  if(lbl==='sim')selectedHits.add(id);else selectedHits.delete(id);
+  // keep the unified export labels in sync (re-rank 'sim'/'diff' → 'similar'/'different')
+  if(lbl===null)delete hitLabels[id];else hitLabels[id]=(lbl==='sim'?'similar':'different');
   updateExportBar();
   applyRerank();
 }
@@ -1665,7 +1748,11 @@ async function doRerankSearch(){
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({fen,board_fen:fen.split(' ')[0].split('/').slice(0,8).join('/'),pockets_white:pw,pockets_black:pb,weights,candidate_k:candidateK,return_k:10,movetime_ms:movetime})
     });
-    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    if(!res.ok){
+      let detail='';
+      try{const ej=await res.json();detail=ej.error||'';if(ej.trace)console.error('rerank trace:',ej.trace);}catch(_){}
+      throw new Error(detail||`HTTP ${res.status}`);
+    }
     const data=await res.json();
     if(toolbarLabel)toolbarLabel.textContent=`Tactical search — ${candidateK} candidates`;
     if(engineBadge){
@@ -1682,13 +1769,13 @@ async function doRerankSearch(){
     lastHits=data.hits||[];
     lastQueryFen=fen;
     currentQueryId='rerank_search';
-    rrLabels={};
+    rrLabels={};hitLabels={};
     _setRrCacheStatus(data.cache_used);
     _renderRerankCards(scored);
     updateExportBar();
   }catch(e){
     console.error('Tactical re-rank search failed:',e);
-    wrap.innerHTML=`<div class="rr-no-results"><div class="ico">⚠</div><div>Search failed: ${e.message}<br><small>Is Fairy-Stockfish configured in app.py?</small></div></div>`;
+    wrap.innerHTML=`<div class="rr-no-results"><div class="ico">⚠</div><div>Re-rank failed:<br><code style="font-size:10px;color:var(--accent)">${escHtml(e.message)}</code><br><small>Full traceback is in the browser console and the Pi's logs (journalctl -u crazyhouse).</small></div></div>`;
   }
 }
 
