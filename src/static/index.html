@@ -1533,8 +1533,8 @@ async function exportLabels(){
   const payload={
     query_id:    currentQueryId||'',
     query_fen:   lastQueryFen,         // ← starting position (what the expert saw)
-    query_solution_uci: lastQuerySolutionUci,     // canonical UCI
-    query_solution_san: lastQuerySolution,        // display form (SAN if entered as SAN)
+    query_solution_uci: moveHistory.map(m=>m.uci).filter(Boolean),   // always live from the Moves box
+    query_solution_san: moveHistory.map(m=>m.label).filter(Boolean),  // display form
     all_hit_ids: order,                // ← display order (what the expert saw)
     bm25_ranks:  bm25_ranks,           // id -> true BM25 rank, independent of row order
     labels:      labels,               // id -> "similar" | "different"; missing = ""

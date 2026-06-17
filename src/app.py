@@ -318,22 +318,45 @@ def _fen_board_and_pockets(fen: str):
     return board, pw, pb, ("black" if turn == "b" else "white")
 
 def _find_query_doc(query_fen: str):
-    """If the query position exists in the corpus, return its full doc (so the export can
-    fill query_id / query_solution / etc. from the real record). Matches board + pockets."""
+    """Return the corpus doc whose board position best matches the query FEN.
+    Priority:
+      1. Exact: same board + same pockets + same turn
+      2. Board + turn match (pockets differ — same puzzle, different pocket state)
+      3. Board-only match (different turn — less likely but still useful for solution lookup)
+    Searches top-10 BM25 hits on static tokens so it stays fast."""
     try:
-        board, pw, pb, _turn = _fen_board_and_pockets(query_fen)
+        board, pw, pb, q_turn = _fen_board_and_pockets(query_fen)
         if not board:
             return None
         tokens = " ".join(encode_static(board) + encode_pockets(pw, pb))
-        for hit in _lucene_search(tokens, "text_static", topk=5):
+        hits = _lucene_search(tokens, "text_static", topk=10)
+        # also try a board-only search in case pocket tokens steer Lucene away
+        board_tokens = " ".join(encode_static(board))
+        hits2 = _lucene_search(board_tokens, "text_static", topk=10)
+        # merge, dedup, exact hits first
+        seen = set(); merged = []
+        for h in hits + hits2:
+            if h.get("id") not in seen:
+                seen.add(h.get("id")); merged.append(h)
+        q_turn_c = q_turn[:1].lower()   # 'w' or 'b'
+        exact = board_turn = board_only = None
+        for hit in merged:
             doc = _lucene_doc(hit.get("id", ""))
             if not doc:
                 continue
             d_board = (doc.get("board_fen", "") or "").split(" ")[0]
-            if d_board == board and _pocket_str(
-                _parse_pocket(doc.get("pockets_white", {})),
-                _parse_pocket(doc.get("pockets_black", {}))) == _pocket_str(pw, pb):
-                return doc
+            if d_board != board:
+                continue
+            d_turn = str(doc.get("turn", "white")).lower()[:1]
+            d_pstr = _pocket_str(_parse_pocket(doc.get("pockets_white", {})),
+                                 _parse_pocket(doc.get("pockets_black", {})))
+            if d_pstr == _pocket_str(pw, pb) and d_turn == q_turn_c:
+                return doc                              # exact match — return immediately
+            if board_turn is None and d_turn == q_turn_c:
+                board_turn = doc
+            if board_only is None:
+                board_only = doc
+        return board_turn or board_only
     except Exception as e:
         print(f"_find_query_doc error: {e}")
     return None
