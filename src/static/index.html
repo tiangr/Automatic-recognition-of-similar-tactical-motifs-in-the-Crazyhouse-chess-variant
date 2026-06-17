@@ -167,6 +167,10 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 .hc-actions{display:flex;gap:4px;margin-top:6px}
 .hc.hc-exp .hc-actions{display:none}   /* expanded view has its own Mark buttons */
 .hc.hc-exp .chk{display:none}
+.hc.hc-viewed{outline:3px solid var(--accent);outline-offset:-1px;background:var(--surface2)}
+.hexp-sol-list{font-family:var(--mono);font-size:11px;line-height:1.7;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 9px;margin:4px 0}
+.hexp-sol-lbl{font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-right:6px}
+.hc.hc-viewed::after{content:'viewed';position:absolute;top:6px;left:8px;font-family:var(--mono);font-size:8px;font-weight:700;color:var(--accent);background:var(--surface);padding:1px 5px;border-radius:3px;border:1px solid var(--accent);z-index:3}
 .rr-action-btn{flex:1;font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 4px;border-radius:4px;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);transition:all .1s;text-align:center;letter-spacing:.02em}
 .rr-action-btn:hover{border-color:var(--text-dim);color:var(--text)}
 .rr-action-btn.mark-sim{border-color:var(--accent-green);color:var(--accent-green)}
@@ -229,7 +233,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
       <div>
         <div class="row-label">FEN</div>
         <div class="fen-row">
-          <input class="fen-input" id="fen-input" type="text" placeholder="Paste FEN…" spellcheck="false"/>
+          <input class="fen-input" id="fen-input" type="text" placeholder="Paste FEN…" spellcheck="false" onfocus="this.select()" onclick="this.select()"/>
           <button class="btn-sm" onclick="loadFen()">Load</button>
           <button class="btn-sm ghost" onclick="resetBoard()">Reset</button>
         </div>
@@ -237,13 +241,12 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
       <div id="solution-section">
         <div class="row-label" style="display:flex;align-items:center;justify-content:space-between;gap:6px">
           <span>Moves</span>
-          <button class="btn-sm ghost" id="moves-edit-btn" onclick="toggleMovesEdit()"
-            style="font-size:9px;padding:1px 7px" title="Type or paste a solution (UCI like e2e4, or drops like N@f6)">✎ Edit</button>
+          <span style="font-size:9px;color:var(--text-dimmer)">click to type / paste a solution</span>
         </div>
-        <div class="solution-display" id="solution-display"><span style="color:var(--text-dimmer);font-size:9px">Make a move to record it here…</span></div>
+        <div class="solution-display" id="solution-display" onclick="toggleMovesEdit()" title="Click to type or paste a solution (UCI like e2e4, or drops like N@f6)" style="cursor:text"><span style="color:var(--text-dimmer);font-size:9px">Make a move to record it here…</span></div>
         <div id="moves-edit-wrap" style="display:none">
           <textarea id="moves-edit-input" spellcheck="false" rows="2"
-            placeholder="e.g.  e2e4 e7e5 Ng1f3  or  N@f6 g7f6 …"
+            placeholder='e.g.  e2e4 e7e5 Ng1f3   ·   N@f6 g7f6   ·   "a8c7", "e8f7", "d6d7"'
             style="width:100%;box-sizing:border-box;font-family:var(--mono);font-size:11px;resize:vertical;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:var(--surface2);color:var(--text)"></textarea>
           <div style="display:flex;gap:4px;margin-top:4px">
             <button class="btn-sm" onclick="applyMovesEdit()" title="Replay these moves from the loaded position">Apply</button>
@@ -412,7 +415,7 @@ let moveHistory=[],historyIdx=-1,initialState=null;
 let currentQueryId=null,currentField='text_all';
 let hitLabels={};            // id -> 'similar' | 'different'  (absent/'' = unmarked)
 let _activeHitNav=null;      // set while a hit card is expanded → drives ←/→ keys
-let lastHits=[],lastQueryFen='',displayOrderIds=[],rrLabelFilter={sim:true,diff:true},rrLabels={};
+let lastHits=[],lastQueryFen='',lastQuerySolution=[],lastQuerySolutionUci=[],displayOrderIds=[],rrLabelFilter={sim:true,diff:true},rrLabels={};
 let weights={bm25:0.25,tactic:0.30,move:0.25,matingpiece:0.10,first_act:0.05,pvlen:0.05,droppcs:0.00,pocket_sim:0.00,rating:0.00};
 
 let activeTab='search';
@@ -512,7 +515,7 @@ function getLegalDropSquares(){
   return out;
 }
 
-function makeMove(fr,fc,tr,tc,promo){
+function makeMove(fr,fc,tr,tc,promo,labelOverride){
   const piece=board[fr][fc],captured=board[tr][tc];
   if(captured){const pt=captured.type==='K'?'Q':captured.type;pockets[piece.color][pt]=(pockets[piece.color][pt]||0)+1;}
   let epCap=false;
@@ -535,13 +538,15 @@ function makeMove(fr,fc,tr,tc,promo){
   enPassant=piece.type==='P'&&Math.abs(fr-tr)===2?sqName((fr+tr)/2,fc):'-';
   turn=turn==='w'?'b':'w';if(turn==='w')fullMove++;
   halfMove=piece.type==='P'||captured||epCap?0:halfMove+1;
-  syncChessJS();updateFenInput();recordMove(sqName(fr,fc)+sqName(tr,tc)+promoLetter);
+  const _uci=sqName(fr,fc)+sqName(tr,tc)+promoLetter;
+  syncChessJS();updateFenInput();recordMove(labelOverride||_uci,_uci);
 }
-function makeDrop(piece,color,tr,tc){
+function makeDrop(piece,color,tr,tc,labelOverride){
   board[tr][tc]={color,type:piece};
   pockets[color][piece]=Math.max(0,(pockets[color][piece]||0)-1);
   turn=turn==='w'?'b':'w';if(turn==='w')fullMove++;halfMove=0;
-  syncChessJS();updateFenInput();recordMove(piece+'@'+sqName(tr,tc));
+  const _uci=piece+'@'+sqName(tr,tc);
+  syncChessJS();updateFenInput();recordMove(labelOverride||_uci,_uci);
 }
 
 function onSquareClick(r,c){
@@ -690,7 +695,12 @@ function _sqFromPoint(x,y){
   if(c<0||c>7||r<0||r>7)return null;return{r,c};
 }
 
-function updateFenInput(){document.getElementById('fen-input').value=currentFenString();}
+function updateFenInput(){
+  // The FEN field represents the QUERY (starting) position and must not drift as the
+  // solution is played in. Show the loaded/starting FEN; fall back to the live board
+  // only before any starting position has been captured.
+  document.getElementById('fen-input').value=initialState?_fenOf(initialState):currentFenString();
+}
 function loadFen(){
   const raw=document.getElementById('fen-input').value.trim();
   if(!raw)return;
@@ -709,13 +719,13 @@ function resetBoard(){
 function toggleMovesEdit(forceClose){
   const wrap=document.getElementById('moves-edit-wrap');
   const disp=document.getElementById('solution-display');
-  const btn=document.getElementById('moves-edit-btn');
+  const btn=document.getElementById('moves-edit-btn');   // may be absent now
   const open=wrap.style.display!=='none';
   if(open||forceClose){
-    wrap.style.display='none';disp.style.display='';btn.textContent='✎ Edit';
+    wrap.style.display='none';disp.style.display='';if(btn)btn.textContent='✎ Edit';
   }else{
     document.getElementById('moves-edit-input').value=moveHistory.map(m=>m.label).join(' ');
-    wrap.style.display='';disp.style.display='none';btn.textContent='✕ Close';
+    wrap.style.display='';disp.style.display='none';if(btn)btn.textContent='✕ Close';
     const ta=document.getElementById('moves-edit-input');ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);
   }
 }
@@ -724,13 +734,13 @@ function playToken(tok){
   tok=(tok||'').trim().replace(/^\d+\.+/,'').trim();   // drop "12." / "12..." move numbers
   if(!tok||tok==='...'||tok==='…')return true;
   // drop:  N@f6 / P@e4  (color is whoever is to move)
-  let m=tok.match(/^([QRBNP])@([a-h][1-8])$/i);
+  let m=tok.match(/^([QRBNP])@([a-h][1-8])[+#]?$/i);
   if(m){
     const piece=m[1].toUpperCase();const {r,c}=sqIdx(m[2].toLowerCase());
     if(board[r][c])return false;
     if((pockets[turn][piece]||0)<=0)return false;
     if(piece==='P'&&(r===0||r===7))return false;
-    makeDrop(piece,turn,r,c);return true;
+    makeDrop(piece,turn,r,c,tok);return true;   // keep the entered token (incl. +/#)
   }
   // UCI coordinate move:  e2e4 / e7e8q
   m=tok.match(/^([a-h][1-8])([a-h][1-8])([qrbnQRBN])?$/);
@@ -738,16 +748,16 @@ function playToken(tok){
     const f=sqIdx(m[1]),t=sqIdx(m[2]);
     if(!board[f.r][f.c]||board[f.r][f.c].color!==turn)return false;
     if(!getLegalTargetsForSq(f.r,f.c).some(s=>s.r===t.r&&s.c===t.c))return false;
-    makeMove(f.r,f.c,t.r,t.c,m[3]);return true;
+    makeMove(f.r,f.c,t.r,t.c,m[3],tok);return true;
   }
-  // SAN fallback:  Nf3, Qxe8, exd5, O-O, e8=Q …
+  // SAN fallback:  Nf3, Qxe8, exd5, O-O, e8=Q …  (keep the SAN as the label)
   if(chessJS){
     try{
       const mv=chessJS.move(tok,{sloppy:true});
       if(mv&&mv.from&&mv.to){
         chessJS.undo();
         const f=sqIdx(mv.from),t=sqIdx(mv.to);
-        makeMove(f.r,f.c,t.r,t.c,mv.promotion);return true;
+        makeMove(f.r,f.c,t.r,t.c,mv.promotion,mv.san||tok);return true;
       }
       if(mv)chessJS.undo();
     }catch(e){}
@@ -760,7 +770,9 @@ function applyMovesEdit(){
   moveHistory=[];historyIdx=-1;selectedSq=null;selectedPocket=null;legalTargets=[];
   let bad=null;
   if(txt){
-    for(const raw of txt.split(/[\s,]+/).filter(Boolean)){
+    // accept both "e2e4 e7e5" and  "e2e4", "e7e5"  (quotes/brackets/commas all stripped)
+    const cleaned=txt.replace(/["'`\[\]()]/g,' ');
+    for(const raw of cleaned.split(/[\s,]+/).filter(Boolean)){
       if(!playToken(raw)){bad=raw;break;}   // stop at the first move that doesn't fit
     }
   }
@@ -769,10 +781,10 @@ function applyMovesEdit(){
   if(bad!==null)alert('Stopped at "'+bad+'": not legal from this position (or not recognised). Earlier moves were applied.');
 }
 
-function recordMove(label){
+function recordMove(label,uci){
   const snap=snapshotState(label);
   moveHistory=moveHistory.slice(0,historyIdx+1);
-  moveHistory.push({label,state:snap});historyIdx=moveHistory.length-1;renderMoveList();
+  moveHistory.push({label,uci:uci||label,state:snap});historyIdx=moveHistory.length-1;renderMoveList();
 }
 function clearMoveHistory(){
   moveHistory=[];historyIdx=-1;
@@ -811,9 +823,10 @@ function renderMoveList(){
     const isCurrent=i===historyIdx;
     const moveNum=startFull+Math.floor((i+(startTurn==='b'?1:0))/2);
     const isWhiteMove=(startTurn==='w')?(i%2===0):(i%2===1);
-    if(isWhiteMove||i===0){if(i>0)html+=' ';html+=`<span style="color:var(--text-dimmer);font-size:9px">${moveNum}.</span> `;}
+    if(isWhiteMove){if(i>0)html+=' ';html+=`<span style="color:var(--text-dimmer);font-size:9px">${moveNum}.</span>`;}
+    else if(i===0){html+=`<span style="color:var(--text-dimmer);font-size:9px">${moveNum}…</span>`;}  // black to move first
     else{html+=' ';}
-    html+=`<span class="sol-move${isCurrent?' current':i<historyIdx?' played':''}" onclick="navJump(${i})">${escHtml(m.label)}</span>`;
+    html+=`<span class="sol-move${isCurrent?' current':i<historyIdx?' played':''}" onclick="event.stopPropagation();navJump(${i})">${_figurine(escHtml(m.label))}</span>`;
   });
   el.innerHTML=html;
   status.textContent=historyIdx===-1?'start':`${historyIdx+1}/${n}`;
@@ -876,7 +889,10 @@ async function doSearch(){
     document.getElementById('hits-area').innerHTML='<div class="ph"><div class="spinner"></div><div>Searching…</div></div>';
   }
   try{
-    const fen=currentFenString();
+    // The query is the STARTING position (as loaded), not the board after the solution
+    // has been played in. Moves entered in the Moves panel are recorded as the query's
+    // solution and exported separately — the query FEN itself never changes.
+    const fen=initialState?_fenOf(initialState):currentFenString();
     const res=await fetch('/api/search_by_fen',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({fen,field:currentField})
@@ -884,7 +900,9 @@ async function doSearch(){
     const data=await res.json();
     if(data.error){alert(data.error);return;}
     currentQueryId=data.query.id;
-    lastQueryFen=fen;   // ← store so export can include it
+    lastQueryFen=fen;   // ← starting position, stored for export
+    lastQuerySolution=moveHistory.map(m=>m.label);       // display form (SAN if entered as SAN)
+    lastQuerySolutionUci=moveHistory.map(m=>m.uci);      // canonical UCI for export
     hitLabels={};
     lastHits=data.hits||[];   // keep BM25 order intact — re-rank tab + export rely on it
     rrLabels={};
@@ -916,6 +934,36 @@ function renderHits(hits){
   hits.forEach((h,i)=>grid.appendChild(buildHitCard(h,i)));
   area.innerHTML='';area.appendChild(grid);
 }
+// Figurine algebraic notation: replace piece letters with chess glyphs.
+const _FIG={K:'♚',Q:'♛',R:'♜',B:'♝',N:'♞'};
+function _figurine(tok){
+  return String(tok)
+    .replace(/=([KQRBN])/g,(m,p)=>'='+_FIG[p])   // promotion piece
+    .replace(/^([KQRBN])/,(m,p)=>_FIG[p]);        // leading piece / drop piece (e.g. R@g5)
+}
+// Numbered (and optionally figurine) solution string, e.g. "1.♛xe6+ ♚g5 2.h4+ ♚h5 3.♜@g5#".
+// startTurn ('w'|'b'|'white'|'black') sets whether move 1 is white or black.
+function fmtSolution(sanList,startTurn,opts){
+  opts=opts||{};
+  const figur=opts.figurine!==false, numbered=opts.numbered!==false;
+  if(!Array.isArray(sanList)||!sanList.length)return '';
+  const startWhite=!(startTurn==='b'||startTurn==='black');
+  const parts=[]; let n=1;
+  for(let i=0;i<sanList.length;i++){
+    const isWhite=startWhite?(i%2===0):(i%2===1);
+    let disp=escHtml(String(sanList[i]));
+    if(figur)disp=_figurine(disp);
+    let prefix='';
+    if(numbered){
+      if(isWhite)prefix=n+'.';
+      else if(i===0)prefix=n+'\u2026';   // black to move first → "1…"
+    }
+    parts.push(prefix+disp);
+    if(numbered&&!isWhite)n++;
+  }
+  return parts.join(' ');
+}
+
 function buildHitCard(h,i){
   const lab=hitLabels[h.id]||'';
   const card=document.createElement('div');
@@ -956,7 +1004,7 @@ function buildHitCard(h,i){
   `;
   hci.appendChild(hrk);
   const solRow=document.createElement('div');solRow.className='hrow';
-  const solStr=sol.length?`<span class="bm">${escHtml(sol[0])}</span>${sol.length>1?' '+escHtml(sol.slice(1).join(' ')):''}` :'<span style="opacity:.4">—</span>';
+  const solStr=sol.length?fmtSolution(sol,h.turn):'<span style="opacity:.4">—</span>';
   solRow.innerHTML=`<span class="hrow-lbl">Solution</span><span class="hrow-val sol">${solStr}</span>`;
   hci.appendChild(solRow);
   const playRow=document.createElement('div');playRow.className='hrow';
@@ -1012,6 +1060,9 @@ function _collapseExpanded(restoreScroll){
   const card=document.getElementById('card_'+cssId(_expandedCardId));
   if(card){
     card.classList.remove('hc-exp');
+    // only the most-recently-closed card stays outlined → clear any previous one
+    document.querySelectorAll('.hc.hc-viewed').forEach(el=>el.classList.remove('hc-viewed'));
+    card.classList.add('hc-viewed');
     const p=card.querySelector('.hexp');if(p)p.remove();
     // put the card back exactly where it was in the list
     if(_origParent){
@@ -1041,7 +1092,9 @@ function toggleHitExpand(h,card){
 // ←/→ (and Home/End) scrub the expanded hit board's move slider, unless the user is
 // typing in a field or the range input itself already has focus (it handles arrows natively).
 document.addEventListener('keydown',e=>{
-  if(!_expandedCardId||!_activeHitNav)return;
+  if(!_expandedCardId)return;
+  if(e.key==='Escape'){e.preventDefault();_collapseExpanded(true);return;}
+  if(!_activeHitNav)return;
   const t=e.target,tag=t&&t.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(t&&t.isContentEditable))return;
   if(e.key==='ArrowLeft'){e.preventDefault();_activeHitNav('prev');}
@@ -1114,7 +1167,16 @@ function HitBoard(h, mountEl){
   const bStart=_navBtn('⇤','First move'),bPrev=_navBtn('←','Prev'),bNext=_navBtn('→','Next'),bEnd=_navBtn('⇥','Last move');
   const bHit=document.createElement('button');bHit.className='nav-btn';bHit.textContent='⊙';bHit.title='Jump to the hit position';bHit.style.marginLeft='auto';bHit.style.fontSize='13px';
   navRow.appendChild(bStart);navRow.appendChild(bPrev);navRow.appendChild(bNext);navRow.appendChild(bEnd);navRow.appendChild(bHit);
-  sliderBox.appendChild(sLbl);sliderBox.appendChild(statusEl);sliderBox.appendChild(moveTxt);sliderBox.appendChild(slider);sliderBox.appendChild(navRow);
+  // full solution line (numbered figurine notation), shown by the slider for reference
+  const solList=document.createElement('div');solList.className='hexp-sol-list';
+  {
+    const sList=Array.isArray(h.solution_san)?h.solution_san:[];
+    const startTurn=(_stateFromHit(h).turn==='b')?'b':'w';
+    solList.innerHTML=sList.length
+      ? `<span class="hexp-sol-lbl">Solution</span> ${fmtSolution(sList,startTurn)}`
+      : '';
+  }
+  sliderBox.appendChild(sLbl);sliderBox.appendChild(statusEl);sliderBox.appendChild(solList);sliderBox.appendChild(moveTxt);sliderBox.appendChild(slider);sliderBox.appendChild(navRow);
   const fenBox=document.createElement('div');fenBox.className='hexp-fen';
   side.appendChild(sliderBox);side.appendChild(fenBox);
 
@@ -1137,53 +1199,42 @@ function HitBoard(h, mountEl){
     render();
   }
   function moveLabel(){
-    if(freePlay)return '<span style="color:var(--text-dimmer)">free play — move the slider to return to the game</span>';
+    if(freePlay)return '<span style="color:var(--text-dimmer)">free play — move the slider to return to the solution</span>';
     const s=states[curIdx]||{};
-    const tag=(curIdx===puzzleIdx&&s.isPuzzle)?' <span class="mv">● hit position</span>':'';
-    if(curIdx===0)return '<span style="color:var(--text-dimmer)">starting position</span>'+tag;
-    return `${escHtml(s.label||('move '+curIdx))}${tag}`;
+    if(curIdx===0)return '<span class="mv">● start of solution</span>';
+    return `${escHtml(s.label||('move '+curIdx))}`;
   }
   function _plyLabel(ply){const f=Math.ceil(ply/2);return f+(ply%2===1?'.':'…');}
 
-  // start with a single-frame placeholder (the hit position) so the board shows instantly
-  setStates([{fen:_fenOf(st),label:'hit position',isPuzzle:true}],0,0);
-
-  // fetch the real game and rebuild the slider over the full actual move list
-  if(h.site){
-    fetch('/api/game_replay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({site:h.site,board_fen:h.board_fen})})
-      .then(r=>r.json()).then(data=>{
-        if(data.error||!Array.isArray(data.plies)||!data.plies.length){
-          const why=data.status?`${data.error} (HTTP ${data.status})`:(data.error||'no moves returned');
-          _fallbackToRecorded(`Couldn't load the game from Lichess: ${why}. Showing the engine-verified line instead.`);
-          return;
-        }
-        const arr=data.plies.map(p=>({fen:p.fen,label:p.san?`${_plyLabel(p.ply)} ${p.san}`:'start',isPuzzle:false}));
-        const sIdx=Math.max(0,Math.min(arr.length-1,data.start_idx||0));
-        arr[sIdx].isPuzzle=true;
-        sLbl.textContent=`Actual game — ${arr.length-1} moves played`;
-        statusEl.innerHTML='Real moves from the game · <span class="mv">⊙</span> jumps to the hit position';
-        setStates(arr,sIdx,sIdx);
-      })
-      .catch(()=>{ _fallbackToRecorded('Network error contacting the server for the game. Showing the engine-verified line instead.'); });
-  }else{
-    _fallbackToRecorded('No game link stored for this hit. Showing the engine-verified line instead.');
-  }
-
-  // fallback: the engine-verified solution line (what was here before), so the board
-  // still works without internet. Clearly labelled as not the real played moves.
-  function _fallbackToRecorded(msg){
+  // Build the SOLUTION line (hit position → mate), straight from the stored solution.
+  // No game fetch: the board steps through exactly the solution shown on the card, and
+  // ⇤ / index 0 is the START OF THE SOLUTION (the hit position), not the game start.
+  (function buildSolutionLine(){
     const sol=Array.isArray(h.solution_uci)?h.solution_uci.filter(Boolean):[];
     const solSan=Array.isArray(h.solution_san)?h.solution_san:[];
+    const startTurn=(_stateFromHit(h).turn==='b')?'b':'w';
     let cur=_stateFromHit(h);
-    const arr=[{fen:_fenOf(cur),label:'hit position',isPuzzle:true}];
+    const arr=[{fen:_fenOf(cur),label:'start of solution',isPuzzle:true}];
+    let n=1;
     for(let k=0;k<sol.length;k++){
-      try{cur=_applyUci(cur,sol[k]);arr.push({fen:_fenOf(cur),label:`engine move ${k+1}: ${escHtml(solSan[k]||sol[k])}`,isPuzzle:false});}
-      catch(e){break;}
+      try{ cur=_applyUci(cur,sol[k]); }catch(e){ break; }
+      const isWhite=(startTurn==='w')?(k%2===0):(k%2===1);
+      const num=isWhite?(n+'.'):(k===0?(n+'\u2026'):'');
+      if(!isWhite)n++;
+      const san=_figurine(escHtml(solSan[k]||sol[k]));
+      arr.push({fen:_fenOf(cur),label:`${num}${san}`.trim(),isPuzzle:false});
     }
-    sLbl.textContent=sol.length?`Engine-verified line (${sol.length} moves)`:'Hit position';
-    statusEl.textContent=msg;
+    if(sol.length){
+      sLbl.textContent=`Solution — mate in ${Math.ceil(sol.length/2)}`;
+      statusEl.innerHTML='Engine-verified mate line · <span class="mv">⇤</span> returns to the start of the solution';
+    }else{
+      sLbl.textContent='Hit position';
+      statusEl.textContent='No solution moves stored for this hit.';
+    }
+    bHit.style.display='none';   // ⇤ already returns to the solution start, so ⊙ is redundant
     setStates(arr,0,0);
-  }
+    bHit.style.display='none';   // setStates re-derives this from isPuzzle; keep it hidden
+  })();
 
   function syncLegality(){
     if(!chess)return;
@@ -1469,7 +1520,9 @@ async function exportLabels(){
   for(const h of lastHits){if(hitLabels[h.id])labels[h.id]=hitLabels[h.id];}
   const payload={
     query_id:    currentQueryId||'',
-    query_fen:   lastQueryFen,         // the FEN that was searched
+    query_fen:   lastQueryFen,         // ← starting position (what the expert saw)
+    query_solution_uci: lastQuerySolutionUci,     // canonical UCI
+    query_solution_san: lastQuerySolution,        // display form (SAN if entered as SAN)
     all_hit_ids: order,                // ← display order (what the expert saw)
     bm25_ranks:  bm25_ranks,           // id -> true BM25 rank, independent of row order
     labels:      labels,               // id -> "similar" | "different"; missing = ""
@@ -1679,8 +1732,8 @@ function _renderRerankCards(scored){
     info.appendChild(titleEl);
     if(sol.length){
       const solEl=document.createElement('div');
-      solEl.style.cssText='font-family:var(--mono);font-size:9px;color:var(--accent2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      solEl.innerHTML=`<b style="color:var(--accent)">${escHtml(sol[0])}</b>${sol.length>1?' '+escHtml(sol.slice(1,3).join(' ')):''}` +(sol.length>3?'…':'');
+      solEl.style.cssText='font-family:var(--mono);font-size:9px;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      solEl.innerHTML=fmtSolution(sol,h.turn);
       info.appendChild(solEl);
     }
     const badgeRow=document.createElement('div');badgeRow.style.cssText='display:flex;gap:3px;flex-wrap:wrap;margin-top:2px';
@@ -1779,7 +1832,7 @@ async function doRerankSearch(){
     lastHits=data.hits||[];
     lastQueryFen=fen;
     currentQueryId='rerank_search';
-    rrLabels={};hitLabels={};
+    rrLabels={};hitLabels={};lastQuerySolution=moveHistory.map(m=>m.label);lastQuerySolutionUci=moveHistory.map(m=>m.uci);
     _setRrCacheStatus(data.cache_used);
     _renderRerankCards(scored);
     updateExportBar();

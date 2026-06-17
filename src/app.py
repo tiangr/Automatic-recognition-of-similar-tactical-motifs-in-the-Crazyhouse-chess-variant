@@ -13,6 +13,7 @@ import json
 import io
 import os
 import platform
+import hashlib
 import re
 import time
 import threading
@@ -36,10 +37,10 @@ ASSETS_DIR = BASE_DIR.parent / "assets"
 LUCENE_URL = "http://localhost:8983"
 CACHE_DIR  = BASE_DIR.parent / "data" / "models"
 
-# Fairy-Stockfish binary. All builds live in crazyhouse/engines/ ; the right one
-# is chosen by OS (and CPU arch). Drop in the binary for each platform you deploy on,
-# or set the FAIRY_STOCKFISH env var to point at a specific file (that always wins).
-ENGINES_DIR = BASE_DIR / "engines"
+# Fairy-Stockfish binary. All builds live in crazyhouse/engines/ (sibling of src/) ;
+# the right one is chosen by OS (and CPU arch). Drop in the binary for each platform you
+# deploy on, or set the FAIRY_STOCKFISH env var to point at a specific file (always wins).
+ENGINES_DIR = BASE_DIR.parent / "engines"
 
 def _engine_filenames() -> list[str]:
     """Candidate binary names for the current OS / architecture, best first."""
@@ -271,6 +272,71 @@ def _parse_pocket(p):
         try: return json.loads(p)
         except: return {}
     return {}
+
+_PIECE_ORDER = "QRBNP"
+
+def _pocket_str(pw, pb) -> str:
+    """Crazyhouse FEN pocket string: white pieces uppercase, black lowercase."""
+    def side(d, upper):
+        s = ""
+        for pc in _PIECE_ORDER:
+            n = int(d.get(pc, 0) or d.get(pc.lower(), 0) or 0)
+            s += (pc if upper else pc.lower()) * n
+        return s
+    return side(_parse_pocket(pw), True) + side(_parse_pocket(pb), False)
+
+def _full_fen(board_fen, pw, pb, turn) -> str:
+    """A complete, loadable Crazyhouse FEN: <board>[/<pocket>] <turn> - - 0 1."""
+    board_fen = (board_fen or "").split(" ")[0]
+    if "[" in board_fen:
+        board_fen = board_fen.split("[")[0]
+    parts = board_fen.split("/")
+    if len(parts) == 9:                # already has a pocket rank — drop it, we rebuild
+        board_fen = "/".join(parts[:8])
+    pocket = _pocket_str(pw, pb)
+    tc = "b" if str(turn or "white").lower().startswith("b") else "w"
+    base = board_fen + ("/" + pocket if pocket else "")
+    return f"{base} {tc} - - 0 1"
+
+def _fen_board_and_pockets(fen: str):
+    """Split a Crazyhouse FEN into (board_fen, pockets_white_dict, pockets_black_dict, turn)."""
+    fen = (fen or "").strip()
+    field = fen.split(" ")
+    turn = field[1] if len(field) > 1 else "w"
+    board = field[0]
+    if "[" in board:
+        board, pk = board.split("[", 1)
+        pk = pk.rstrip("]")
+    else:
+        parts = board.split("/")
+        pk = parts[8] if len(parts) == 9 else ""
+        board = "/".join(parts[:8])
+    pw, pb = {}, {}
+    for ch in pk:
+        if ch.isupper(): pw[ch] = pw.get(ch, 0) + 1
+        elif ch.islower(): pb[ch.upper()] = pb.get(ch.upper(), 0) + 1
+    return board, pw, pb, ("black" if turn == "b" else "white")
+
+def _find_query_doc(query_fen: str):
+    """If the query position exists in the corpus, return its full doc (so the export can
+    fill query_id / query_solution / etc. from the real record). Matches board + pockets."""
+    try:
+        board, pw, pb, _turn = _fen_board_and_pockets(query_fen)
+        if not board:
+            return None
+        tokens = " ".join(encode_static(board) + encode_pockets(pw, pb))
+        for hit in _lucene_search(tokens, "text_static", topk=5):
+            doc = _lucene_doc(hit.get("id", ""))
+            if not doc:
+                continue
+            d_board = (doc.get("board_fen", "") or "").split(" ")[0]
+            if d_board == board and _pocket_str(
+                _parse_pocket(doc.get("pockets_white", {})),
+                _parse_pocket(doc.get("pockets_black", {}))) == _pocket_str(pw, pb):
+                return doc
+    except Exception as e:
+        print(f"_find_query_doc error: {e}")
+    return None
 
 
 def _parse_arr(v):
@@ -546,9 +612,13 @@ def search_by_fen():
     raw_hits = _lucene_search(query_tokens, "text_static", topk)
     hits = [_format_hit(h, i+1) for i, h in enumerate(raw_hits)]
 
+    # stable, unique id for this query position (same FEN → same id) so exports are
+    # identifiable instead of all sharing the "search_by_fen" placeholder.
+    query_id = "qfen_" + hashlib.sha1((raw_fen or board_fen).encode("utf-8")).hexdigest()[:12]
+
     return jsonify({
         "query": {
-            "id":            "search_by_fen",
+            "id":            query_id,
             "board_fen":     board_fen,
             "pockets_white": pw,
             "pockets_black": pb,
@@ -1097,8 +1167,40 @@ def export_labels():
     # the on-screen display order). Falls back to row position if not supplied.
     bm25_ranks = dict(data.get("bm25_ranks") or {})
 
-    q_doc = _lucene_doc(query_id) if query_id and query_id != "search_by_fen" and query_id != "rerank_search" else None
+    q_doc = _lucene_doc(query_id) if query_id and query_id not in ("search_by_fen", "rerank_search") and not query_id.startswith("qfen_") else None
+    # If we don't have a corpus doc for the query but the query position IS in the corpus,
+    # adopt that doc so query_id / solution / mate / etc. come from the real record.
+    if not q_doc and query_fen:
+        matched = _find_query_doc(query_fen)
+        if matched:
+            q_doc = matched
+            query_id = matched.get("id", query_id)   # use the real corpus id
     out   = io.StringIO()
+
+    # the query's full, loadable FEN (board + pockets + turn)
+    if query_fen:
+        q_board, q_pw, q_pb, q_turn_full = _fen_board_and_pockets(query_fen)
+        query_fen_full = _full_fen(q_board, q_pw, q_pb, q_turn_full)
+    elif q_doc:
+        query_fen_full = _full_fen(q_doc.get("board_fen", ""), q_doc.get("pockets_white", {}),
+                                   q_doc.get("pockets_black", {}), q_doc.get("turn", "white"))
+    else:
+        query_fen_full = ""
+
+    # query solution: prefer what the frontend sent (user-entered); else the corpus doc.
+    q_sol_san = _parse_arr(data.get("query_solution_san")) or (_parse_arr(q_doc.get("solution_san")) if q_doc else [])
+    q_sol_uci = _parse_arr(data.get("query_solution_uci")) or (_parse_arr(q_doc.get("solution_uci")) if q_doc else [])
+    _qparts = (query_fen or "").split()
+    if q_doc:
+        q_turn = q_doc.get("turn", "")
+    elif len(_qparts) > 1 and _qparts[1] in ("w", "b"):
+        q_turn = "white" if _qparts[1] == "w" else "black"
+    else:
+        q_turn = ""
+    if q_doc:
+        q_mate = q_doc.get("mate_in") or q_doc.get("mate_before")
+    else:
+        q_mate = (len(q_sol_uci) + 1) // 2 if q_sol_uci else None
 
     for rank, hit_id in enumerate(all_hit_ids, start=1):
         h_doc = _lucene_doc(hit_id) or {}
@@ -1111,16 +1213,19 @@ def export_labels():
             "label":                  lab,   # "similar" | "different" | ""
             "display_rank":           rank,  # position as shown on screen / in this file
             "bm25_rank":              bm25_ranks.get(hit_id, rank),  # true BM25 rank
-            # query_fen: prefer the live FEN from the frontend over the stored doc FEN
-            "query_fen":              query_fen or (q_doc.get("board_fen") if q_doc else ""),
-            "candidate_fen":          h_doc.get("board_fen", ""),
-            "query_mate":             q_doc.get("mate_in") or q_doc.get("mate_before") if q_doc else None,
+            # full, loadable Crazyhouse FENs (board + pockets + turn)
+            "query_fen":              query_fen_full,
+            "candidate_fen":          _full_fen(h_doc.get("board_fen", ""),
+                                                h_doc.get("pockets_white", {}),
+                                                h_doc.get("pockets_black", {}),
+                                                h_doc.get("turn", "white")),
+            "query_mate":             q_mate,
             "candidate_mate":         h_doc.get("mate_in") or h_doc.get("mate_before"),
-            "query_turn":             q_doc.get("turn", "") if q_doc else "",
+            "query_turn":             q_turn,
             "candidate_turn":         h_doc.get("turn", ""),
-            "query_solution_san":     _parse_arr(q_doc.get("solution_san")) if q_doc else [],
+            "query_solution_san":     q_sol_san,
             "candidate_solution_san": _parse_arr(h_doc.get("solution_san")),
-            "query_solution_uci":     _parse_arr(q_doc.get("solution_uci")) if q_doc else [],
+            "query_solution_uci":     q_sol_uci,
             "candidate_solution_uci": _parse_arr(h_doc.get("solution_uci")),
             "query_text_static":      q_doc.get("text_static", "") if q_doc else "",
             "candidate_text_static":  h_doc.get("text_static", ""),
