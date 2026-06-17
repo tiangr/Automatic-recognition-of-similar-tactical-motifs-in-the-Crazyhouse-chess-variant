@@ -29,13 +29,14 @@ header h1 span{color:var(--text-dim);font-weight:400}
 .board-label{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);align-self:flex-start}
 .pocket-strip{display:flex;align-items:center;gap:3px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;min-height:30px;width:calc(var(--sq)*8 + 4px)}
 .plbl{font-family:var(--mono);font-size:9px;color:var(--text-dimmer);margin-right:4px;font-weight:700}
-.pp{width:28px;height:28px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);position:relative;cursor:pointer;transition:transform .1s,box-shadow .1s;background:var(--surface3)}
+.pp{width:28px;height:28px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);position:relative;cursor:grab;touch-action:none;transition:transform .1s,box-shadow .1s;background:var(--surface3)}
+.pocket-strip .pp:active{cursor:grabbing}
 .pp:hover{transform:scale(1.15);box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .pp.pw{background:#fdf6e3;border-color:#ddd0a8}.pp.pb{background:#e8eef7;border-color:#b0c2d8}
 .pp.pocket-sel{box-shadow:0 0 0 2px var(--accent) !important;transform:scale(1.15)}
 .pp-count{position:absolute;bottom:-3px;right:-3px;font-family:var(--mono);font-size:8px;font-weight:700;background:var(--accent);color:#fff;border-radius:3px;padding:0 2px;line-height:12px;pointer-events:none}
 .empty-pocket{font-family:var(--mono);font-size:9px;color:var(--text-dimmer);font-style:italic}
-#iboard{position:relative;width:calc(var(--sq)*8);height:calc(var(--sq)*8);border:2px solid var(--border);border-radius:4px;overflow:hidden;flex-shrink:0;user-select:none;box-shadow:0 2px 12px rgba(0,0,0,.10)}
+#iboard{position:relative;width:calc(var(--sq)*8);height:calc(var(--sq)*8);border:2px solid var(--border);border-radius:4px;overflow:hidden;flex-shrink:0;user-select:none;touch-action:none;box-shadow:0 2px 12px rgba(0,0,0,.10)}
 .sq{position:absolute;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .sq.light{background:#f0d9b5}.sq.dark{background:#b58863}
 .sq.selected{background:#f6f669 !important}
@@ -179,8 +180,8 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 .hexp-close{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:700;width:24px;height:24px;border-radius:5px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text-dim)}
 .hexp-body{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
 .hexp-boardwrap{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
-.hexp-board{position:relative;border:2px solid var(--border);border-radius:4px;overflow:hidden;user-select:none;box-shadow:0 2px 12px rgba(0,0,0,.10)}
-.hexp-pocket{display:flex;align-items:center;gap:3px;flex-wrap:wrap;background:var(--surface3);border:1px solid var(--border);border-radius:6px;padding:3px 6px;min-height:26px}
+.hexp-board{position:relative;border:2px solid var(--border);border-radius:4px;overflow:hidden;user-select:none;touch-action:none;box-shadow:0 2px 12px rgba(0,0,0,.10)}
+.hexp-pocket{display:flex;align-items:center;gap:3px;flex-wrap:wrap;background:var(--surface3);border:1px solid var(--border);border-radius:6px;padding:3px 6px;min-height:26px;touch-action:none}
 .hexp-pocket .plbl{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--text-dimmer);margin-right:2px}
 .hexp-pocket .pp{width:24px;height:24px}
 .hexp-pocket .empty-pocket{font-family:var(--mono);font-size:8px;color:var(--text-dimmer)}
@@ -221,8 +222,22 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
         </div>
       </div>
       <div id="solution-section">
-        <div class="row-label">Moves</div>
+        <div class="row-label" style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+          <span>Moves</span>
+          <button class="btn-sm ghost" id="moves-edit-btn" onclick="toggleMovesEdit()"
+            style="font-size:9px;padding:1px 7px" title="Type or paste a solution (UCI like e2e4, or drops like N@f6)">✎ Edit</button>
+        </div>
         <div class="solution-display" id="solution-display"><span style="color:var(--text-dimmer);font-size:9px">Make a move to record it here…</span></div>
+        <div id="moves-edit-wrap" style="display:none">
+          <textarea id="moves-edit-input" spellcheck="false" rows="2"
+            placeholder="e.g.  e2e4 e7e5 Ng1f3  or  N@f6 g7f6 …"
+            style="width:100%;box-sizing:border-box;font-family:var(--mono);font-size:11px;resize:vertical;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:var(--surface2);color:var(--text)"></textarea>
+          <div style="display:flex;gap:4px;margin-top:4px">
+            <button class="btn-sm" onclick="applyMovesEdit()" title="Replay these moves from the loaded position">Apply</button>
+            <button class="btn-sm ghost" onclick="toggleMovesEdit(true)">Cancel</button>
+            <span style="font-size:9px;color:var(--text-dimmer);align-self:center;margin-left:auto">space-separated · UCI or SAN · drops as N@f6</span>
+          </div>
+        </div>
         <div class="nav-row" style="margin-top:6px">
           <button class="nav-btn" id="nav-start" onclick="navGo('start')" title="Start">⇤</button>
           <button class="nav-btn" id="nav-prev"  onclick="navGo('prev')"  title="Prev">←</button>
@@ -407,6 +422,7 @@ function parseCrazyhouseFen(fen){
     const row=boardRanks[r]||'';let c=0;
     for(const ch of row){
       if(c>=8)break;
+      if(ch==='~'){if(c>0&&nb[r][c-1])nb[r][c-1].promoted=true;continue;}
       if('12345678'.includes(ch)){c+=+ch;}
       else{nb[r][c]={color:ch===ch.toUpperCase()?'w':'b',type:ch.toUpperCase()};c++;}
     }
@@ -481,7 +497,7 @@ function getLegalDropSquares(){
   return out;
 }
 
-function makeMove(fr,fc,tr,tc){
+function makeMove(fr,fc,tr,tc,promo){
   const piece=board[fr][fc],captured=board[tr][tc];
   if(captured){const pt=captured.type==='K'?'Q':captured.type;pockets[piece.color][pt]=(pockets[piece.color][pt]||0)+1;}
   let epCap=false;
@@ -489,7 +505,12 @@ function makeMove(fr,fc,tr,tc){
     epCap=true;board[fr][tc]=null;pockets[piece.color]['P']=(pockets[piece.color]['P']||0)+1;
   }
   board[tr][tc]=piece;board[fr][fc]=null;
-  if(piece.type==='P'&&(tr===0||tr===7))board[tr][tc]={color:piece.color,type:'Q'};
+  let promoLetter='';
+  if(piece.type==='P'&&(tr===0||tr===7)){
+    const pt=(promo&&'QRBN'.includes(promo.toUpperCase()))?promo.toUpperCase():'Q';
+    board[tr][tc]={color:piece.color,type:pt};
+    if(pt!=='Q')promoLetter=pt.toLowerCase();
+  }
   if(piece.type==='K'){
     if(fc===4&&tc===6){board[tr][5]=board[tr][7];board[tr][7]=null;}
     if(fc===4&&tc===2){board[tr][3]=board[tr][0];board[tr][0]=null;}
@@ -499,7 +520,7 @@ function makeMove(fr,fc,tr,tc){
   enPassant=piece.type==='P'&&Math.abs(fr-tr)===2?sqName((fr+tr)/2,fc):'-';
   turn=turn==='w'?'b':'w';if(turn==='w')fullMove++;
   halfMove=piece.type==='P'||captured||epCap?0:halfMove+1;
-  syncChessJS();updateFenInput();recordMove(sqName(fr,fc)+sqName(tr,tc));
+  syncChessJS();updateFenInput();recordMove(sqName(fr,fc)+sqName(tr,tc)+promoLetter);
 }
 function makeDrop(piece,color,tr,tc){
   board[tr][tc]={color,type:piece};
@@ -527,13 +548,11 @@ function onSquareClick(r,c){
   renderBoard();
 }
 function onPocketPieceClick(color,piece){
+  if(_suppressClick){_suppressClick=false;return;}
   if(color!==turn)return;
   if((pockets[color][piece]||0)<=0)return;
   if(historyIdx<moveHistory.length-1)moveHistory=moveHistory.slice(0,historyIdx+1);
   selectedSq=null;
-  if(selectedPocket&&selectedPocket.color===color&&selectedPocket.piece===piece){
-    selectedPocket=null;legalTargets=[];renderBoard();renderPockets();return;
-  }
   selectedPocket={color,piece};legalTargets=getLegalDropSquares();
   renderBoard();renderPockets();
 }
@@ -558,7 +577,7 @@ function renderBoard(){
     if(piece){const img=document.createElement('img');img.className='piece-img';img.src=pieceUrl(piece.color,piece.type);img.alt=piece.color+piece.type;img.draggable=false;div.appendChild(img);}
     if(c===0){const co=document.createElement('span');co.className='coord rank'+(isLight?'':' on-dark');co.textContent=8-r;div.appendChild(co);}
     if(r===7){const co=document.createElement('span');co.className='coord file'+(isLight?'':' on-dark');co.textContent=String.fromCharCode('a'.charCodeAt(0)+c);div.appendChild(co);}
-    div.addEventListener('click',()=>{if(!_dragMoved)onSquareClick(r,c);});
+    div.addEventListener('click',()=>{if(_suppressClick){_suppressClick=false;return;}onSquareClick(r,c);});
     el.appendChild(div);
   }
 }
@@ -576,7 +595,7 @@ function renderPocketStrip(elId,color){
     if(n>0){
       any=true;
       const isSel=selectedPocket&&selectedPocket.color===color&&selectedPocket.piece===pc;
-      html+=`<span class="pp ${cls}${isSel?' pocket-sel':''}" onclick="onPocketPieceClick('${color}','${pc}')" title="Drop ${pc}">
+      html+=`<span class="pp ${cls}${isSel?' pocket-sel':''}" data-piece="${pc}" data-color="${color}" onclick="onPocketPieceClick('${color}','${pc}')" title="Drop ${pc} (click a square, or drag onto the board)">
         ${pieceImg(color,pc,'piece-img')}${n>1?`<span class="pp-count">${n}</span>`:''}
       </span>`;
     }
@@ -585,20 +604,43 @@ function renderPocketStrip(elId,color){
   el.innerHTML=html;
 }
 
-let _dragging=null,_dragMoved=false;
+let _dragging=null,_dragMoved=false,_suppressClick=false;
 const _ghost=document.getElementById('drag-ghost');
 const _ghostImg=document.getElementById('drag-ghost-img');
 
+// ── drag a piece already on the board ───────────────────────────────────────
 document.getElementById('iboard').addEventListener('pointerdown',e=>{
   const sq=e.target.closest('.sq');if(!sq)return;
   const r=parseInt(sq.dataset.r),c=parseInt(sq.dataset.c);
   const p=board[r][c];if(!p||p.color!==turn)return;
-  e.preventDefault();_dragMoved=false;_dragging={r,c,color:p.color,type:p.type};
+  e.preventDefault();_dragMoved=false;_dragging={r,c,color:p.color,type:p.type};_suppressClick=false;
   _ghostImg.src=pieceUrl(p.color,p.type);_ghost.style.display='block';
   _moveGhost(e.clientX,e.clientY);
   document.getElementById('iboard').setPointerCapture(e.pointerId);
-  selectedSq={r,c};legalTargets=getLegalTargetsForSq(r,c);renderBoard();
+  selectedPocket=null;selectedSq={r,c};legalTargets=getLegalTargetsForSq(r,c);renderBoard();renderPockets();
 });
+
+// ── drag a piece "from hand" (pocket) onto the board ────────────────────────
+function _attachPocketDrag(stripId,color){
+  const strip=document.getElementById(stripId);if(!strip)return;
+  strip.addEventListener('pointerdown',e=>{
+    const pp=e.target.closest('.pp');if(!pp)return;
+    const piece=pp.dataset.piece;if(!piece)return;
+    if(color!==turn)return;                          // only the side to move may drop
+    if((pockets[color][piece]||0)<=0)return;
+    e.preventDefault();_dragMoved=false;_suppressClick=false;
+    _dragging={fromPocket:true,color,piece};
+    _ghostImg.src=pieceUrl(color,piece);_ghost.style.display='block';
+    _moveGhost(e.clientX,e.clientY);
+    strip.setPointerCapture(e.pointerId);
+    if(historyIdx<moveHistory.length-1)moveHistory=moveHistory.slice(0,historyIdx+1);
+    selectedSq=null;selectedPocket={color,piece};legalTargets=getLegalDropSquares();
+    renderBoard();renderPockets();
+  });
+}
+_attachPocketDrag('pocket-white','w');
+_attachPocketDrag('pocket-black','b');
+
 document.addEventListener('pointermove',e=>{
   if(!_dragging)return;_dragMoved=true;_moveGhost(e.clientX,e.clientY);
   document.querySelectorAll('#iboard .drag-over-sq').forEach(el=>el.classList.remove('drag-over-sq'));
@@ -607,21 +649,22 @@ document.addEventListener('pointermove',e=>{
 });
 document.addEventListener('pointerup',e=>{
   if(!_dragging)return;
+  const d=_dragging;_dragging=null;
   _ghost.style.display='none';
   document.querySelectorAll('#iboard .drag-over-sq').forEach(el=>el.classList.remove('drag-over-sq'));
-  if(_dragMoved){
-    const target=_sqFromPoint(e.clientX,e.clientY);
-    if(target&&!(target.r===_dragging.r&&target.c===_dragging.c)){
-      const ok=legalTargets.some(t=>t.r===target.r&&t.c===target.c);
-      if(ok){
-        if(historyIdx<moveHistory.length-1)moveHistory=moveHistory.slice(0,historyIdx+1);
-        makeMove(_dragging.r,_dragging.c,target.r,target.c);
-        selectedSq=null;legalTargets=[];renderBoard();renderPockets();_dragging=null;return;
-      }
+  if(!_dragMoved)return;                 // plain tap — let the click handler do select/deselect
+  _suppressClick=true;                   // a real drag happened — swallow the trailing click
+  const target=_sqFromPoint(e.clientX,e.clientY);
+  if(target){
+    const ok=legalTargets.some(t=>t.r===target.r&&t.c===target.c);
+    if(d.fromPocket){
+      if(ok)makeDrop(d.piece,d.color,target.r,target.c);
+    }else if(!(target.r===d.r&&target.c===d.c)&&ok){
+      if(historyIdx<moveHistory.length-1)moveHistory=moveHistory.slice(0,historyIdx+1);
+      makeMove(d.r,d.c,target.r,target.c);
     }
-    selectedSq=null;legalTargets=[];renderBoard();
   }
-  _dragging=null;
+  selectedSq=null;selectedPocket=null;legalTargets=[];renderBoard();renderPockets();
 });
 function _moveGhost(x,y){_ghost.style.left=x+'px';_ghost.style.top=y+'px';}
 function _sqFromPoint(x,y){
@@ -645,6 +688,70 @@ function resetBoard(){
   applyFen(s);document.getElementById('fen-input').value=s;
   initialState=snapshotState('initial');moveHistory=[];historyIdx=-1;
   selectedSq=null;selectedPocket=null;legalTargets=[];renderBoard();renderPockets();renderMoveList();
+}
+
+// ── editable Moves field ───────────────────────────────────────────────────
+function toggleMovesEdit(forceClose){
+  const wrap=document.getElementById('moves-edit-wrap');
+  const disp=document.getElementById('solution-display');
+  const btn=document.getElementById('moves-edit-btn');
+  const open=wrap.style.display!=='none';
+  if(open||forceClose){
+    wrap.style.display='none';disp.style.display='';btn.textContent='✎ Edit';
+  }else{
+    document.getElementById('moves-edit-input').value=moveHistory.map(m=>m.label).join(' ');
+    wrap.style.display='';disp.style.display='none';btn.textContent='✕ Close';
+    const ta=document.getElementById('moves-edit-input');ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);
+  }
+}
+// play a single token onto the live board; returns true if it was legal/recognised
+function playToken(tok){
+  tok=(tok||'').trim().replace(/^\d+\.+/,'').trim();   // drop "12." / "12..." move numbers
+  if(!tok||tok==='...'||tok==='…')return true;
+  // drop:  N@f6 / P@e4  (color is whoever is to move)
+  let m=tok.match(/^([QRBNP])@([a-h][1-8])$/i);
+  if(m){
+    const piece=m[1].toUpperCase();const {r,c}=sqIdx(m[2].toLowerCase());
+    if(board[r][c])return false;
+    if((pockets[turn][piece]||0)<=0)return false;
+    if(piece==='P'&&(r===0||r===7))return false;
+    makeDrop(piece,turn,r,c);return true;
+  }
+  // UCI coordinate move:  e2e4 / e7e8q
+  m=tok.match(/^([a-h][1-8])([a-h][1-8])([qrbnQRBN])?$/);
+  if(m){
+    const f=sqIdx(m[1]),t=sqIdx(m[2]);
+    if(!board[f.r][f.c]||board[f.r][f.c].color!==turn)return false;
+    if(!getLegalTargetsForSq(f.r,f.c).some(s=>s.r===t.r&&s.c===t.c))return false;
+    makeMove(f.r,f.c,t.r,t.c,m[3]);return true;
+  }
+  // SAN fallback:  Nf3, Qxe8, exd5, O-O, e8=Q …
+  if(chessJS){
+    try{
+      const mv=chessJS.move(tok,{sloppy:true});
+      if(mv&&mv.from&&mv.to){
+        chessJS.undo();
+        const f=sqIdx(mv.from),t=sqIdx(mv.to);
+        makeMove(f.r,f.c,t.r,t.c,mv.promotion);return true;
+      }
+      if(mv)chessJS.undo();
+    }catch(e){}
+  }
+  return false;
+}
+function applyMovesEdit(){
+  const txt=document.getElementById('moves-edit-input').value.trim();
+  if(initialState)applyState(initialState);
+  moveHistory=[];historyIdx=-1;selectedSq=null;selectedPocket=null;legalTargets=[];
+  let bad=null;
+  if(txt){
+    for(const raw of txt.split(/[\s,]+/).filter(Boolean)){
+      if(!playToken(raw)){bad=raw;break;}   // stop at the first move that doesn't fit
+    }
+  }
+  syncChessJS();updateFenInput();renderBoard();renderPockets();renderMoveList();
+  toggleMovesEdit(true);
+  if(bad!==null)alert('Stopped at "'+bad+'": not legal from this position (or not recognised). Earlier moves were applied.');
 }
 
 function recordMove(label){
@@ -708,6 +815,8 @@ function parseFenToGrid(fen){
   for(let r=0;r<8;r++){
     let c=0;
     for(const ch of(rows[r]||'')){
+      if(c>=8)break;
+      if(ch==='~'){if(c>0&&grid[r*8+c-1])grid[r*8+c-1].promoted=true;continue;}
       if('12345678'.includes(ch)){c+=+ch;}
       else{grid[r*8+c]={color:ch===ch.toUpperCase()?'w':'b',type:ch.toUpperCase()};c++;}
     }
@@ -937,6 +1046,7 @@ function HitBoard(h, mountEl){
   let st=_stateFromHit(h);           // initial placeholder = the hit position itself
   let freePlay=false;
   let selSq=null, selPocket=null, legal=[];
+  let _hbDrag=null, _hbMoved=false, _hbSuppress=false;
   let chess=null; try{if(window.Chess)chess=new Chess();}catch(e){}
 
   // ---- layout ----
@@ -1047,6 +1157,7 @@ function HitBoard(h, mountEl){
     return out;
   }
   function onSquare(r,c){
+    if(_hbSuppress){_hbSuppress=false;return;}
     if(selPocket){
       if(legal.some(t=>t.r===r&&t.c===c)){st=_applyUci(st,selPocket.piece+'@'+sqName(r,c));freePlay=true;}
       selPocket=null;selSq=null;legal=[];render();return;
@@ -1061,10 +1172,10 @@ function HitBoard(h, mountEl){
     render();
   }
   function onPocket(color,piece){
+    if(_hbSuppress){_hbSuppress=false;return;}
     if(color!==st.turn)return;
     if((st.pockets[color][piece]||0)<=0)return;
     selSq=null;
-    if(selPocket&&selPocket.color===color&&selPocket.piece===piece){selPocket=null;legal=[];render();return;}
     selPocket={color,piece};legal=legalDropSquares();render();
   }
   function render(){
@@ -1110,6 +1221,67 @@ function HitBoard(h, mountEl){
     el.querySelectorAll('.pp').forEach(pp=>pp.addEventListener('click',()=>onPocket(pp.dataset.color,pp.dataset.piece)));
   }
   function _navBtn(txt,title){const b=document.createElement('button');b.className='nav-btn';b.textContent=txt;b.title=title;return b;}
+
+  // ---- drag and drop (board pieces + pocket pieces), mirrors the main board ----
+  function _hbSqFromPoint(x,y){
+    const rect=boardEl.getBoundingClientRect();
+    if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)return null;
+    const c=Math.floor((x-rect.left)/SQ),r=Math.floor((y-rect.top)/SQ);
+    if(c<0||c>7||r<0||r>7)return null;return{r,c};
+  }
+  function _hbBeginGhost(srcEl,e,color,type){
+    srcEl.setPointerCapture(e.pointerId);
+    _ghostImg.src=pieceUrl(color,type);_ghost.style.display='block';_moveGhost(e.clientX,e.clientY);
+  }
+  function _hbMove(e){
+    if(!_hbDrag)return;_hbMoved=true;_moveGhost(e.clientX,e.clientY);
+    boardEl.querySelectorAll('.drag-over-sq').forEach(el=>el.classList.remove('drag-over-sq'));
+    const t=_hbSqFromPoint(e.clientX,e.clientY);
+    if(t){const sq=boardEl.children[t.r*8+t.c];if(sq)sq.classList.add('drag-over-sq');}
+  }
+  function _hbUp(e){
+    if(!_hbDrag)return;const d=_hbDrag;_hbDrag=null;
+    _ghost.style.display='none';
+    boardEl.querySelectorAll('.drag-over-sq').forEach(el=>el.classList.remove('drag-over-sq'));
+    if(!_hbMoved)return;                 // plain tap — leave it to the click handler
+    _hbSuppress=true;                    // a real drag happened — swallow the trailing click
+    const t=_hbSqFromPoint(e.clientX,e.clientY);
+    if(t){
+      const ok=legal.some(x=>x.r===t.r&&x.c===t.c);
+      if(d.fromPocket){
+        if(ok){st=_applyUci(st,d.piece+'@'+sqName(t.r,t.c));freePlay=true;}
+      }else if(!(t.r===d.r&&t.c===d.c)&&ok){
+        st=_applyUci(st,sqName(d.r,d.c)+sqName(t.r,t.c));freePlay=true;
+      }
+    }
+    selSq=null;selPocket=null;legal=[];render();
+  }
+  boardEl.addEventListener('pointerdown',e=>{
+    const sq=e.target.closest('.sq');if(!sq)return;
+    const idx=Array.prototype.indexOf.call(boardEl.children,sq);if(idx<0)return;
+    const r=Math.floor(idx/8),c=idx%8;
+    const p=st.board[r][c];if(!p||p.color!==st.turn)return;
+    e.preventDefault();_hbMoved=false;_hbSuppress=false;
+    _hbDrag={r,c,color:p.color,type:p.type};
+    selPocket=null;selSq={r,c};legal=legalTargetsFor(r,c);render();
+    _hbBeginGhost(boardEl,e,p.color,p.type);
+  });
+  function _hbPocketDown(strip,color,e){
+    const pp=e.target.closest('.pp');if(!pp)return;
+    const piece=pp.dataset.piece;if(!piece)return;
+    if(color!==st.turn)return;
+    if((st.pockets[color][piece]||0)<=0)return;
+    e.preventDefault();_hbMoved=false;_hbSuppress=false;
+    _hbDrag={fromPocket:true,color,piece};
+    selSq=null;selPocket={color,piece};legal=legalDropSquares();render();
+    _hbBeginGhost(strip,e,color,piece);
+  }
+  pocketTop.addEventListener('pointerdown',e=>_hbPocketDown(pocketTop,'b',e));
+  pocketBot.addEventListener('pointerdown',e=>_hbPocketDown(pocketBot,'w',e));
+  [boardEl,pocketTop,pocketBot].forEach(el=>{
+    el.addEventListener('pointermove',_hbMove);
+    el.addEventListener('pointerup',_hbUp);
+  });
 
   // ---- wire controls ----
   slider.addEventListener('input',()=>gotoIdx(parseInt(slider.value)));
