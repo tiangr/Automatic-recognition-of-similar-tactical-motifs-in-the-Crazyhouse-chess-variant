@@ -347,6 +347,22 @@ def _parse_arr(v):
     return []
 
 
+def _fix_drop_san(san_list, uci_list):
+    """Repair drop SAN that lost its piece letter (e.g. '@h3+' → 'P@h3+') using the
+    parallel UCI ('P@h3'). Leaves normal moves and well-formed drops untouched."""
+    out = []
+    for i, s in enumerate(san_list or []):
+        s = str(s)
+        if s.startswith("@") and i < len(uci_list or []):
+            u = str(uci_list[i])
+            if "@" in u:
+                piece = u.split("@", 1)[0].strip()
+                if piece:
+                    s = piece[0].upper() + s   # "@h3+" -> "P@h3+"
+        out.append(s)
+    return out
+
+
 def _format_hit(h: dict, rank: int) -> dict:
     site = h.get("site") or ""
     ply  = h.get("ply") or 0
@@ -359,6 +375,7 @@ def _format_hit(h: dict, rank: int) -> dict:
     pb = _parse_pocket(h.get("pockets_black", {}))
     solution_san = _parse_arr(h.get("solution_san", []))
     solution_uci = _parse_arr(h.get("solution_uci", []))
+    solution_san = _fix_drop_san(solution_san, solution_uci)   # '@h3+' → 'P@h3+'
     mate_in      = h.get("mate_in") or h.get("mate_before")
 
     return {
@@ -1190,6 +1207,7 @@ def export_labels():
     # query solution: prefer what the frontend sent (user-entered); else the corpus doc.
     q_sol_san = _parse_arr(data.get("query_solution_san")) or (_parse_arr(q_doc.get("solution_san")) if q_doc else [])
     q_sol_uci = _parse_arr(data.get("query_solution_uci")) or (_parse_arr(q_doc.get("solution_uci")) if q_doc else [])
+    q_sol_san = _fix_drop_san(q_sol_san, q_sol_uci)   # '@h3+' → 'P@h3+'
     _qparts = (query_fen or "").split()
     if q_doc:
         q_turn = q_doc.get("turn", "")
@@ -1224,7 +1242,8 @@ def export_labels():
             "query_turn":             q_turn,
             "candidate_turn":         h_doc.get("turn", ""),
             "query_solution_san":     q_sol_san,
-            "candidate_solution_san": _parse_arr(h_doc.get("solution_san")),
+            "candidate_solution_san": _fix_drop_san(_parse_arr(h_doc.get("solution_san")),
+                                                    _parse_arr(h_doc.get("solution_uci"))),
             "query_solution_uci":     q_sol_uci,
             "candidate_solution_uci": _parse_arr(h_doc.get("solution_uci")),
             "query_text_static":      q_doc.get("text_static", "") if q_doc else "",

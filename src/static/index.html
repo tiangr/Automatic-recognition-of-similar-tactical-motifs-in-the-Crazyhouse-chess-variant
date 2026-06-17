@@ -581,6 +581,7 @@ function renderBoard(){
   const el=document.getElementById('iboard');
   el.innerHTML='';
   const SQ=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sq'))||48;
+  const flip=!!(initialState&&(initialState.turn==='b'||initialState.turn==='black'));  // attacker at the bottom
   const legalSet={};
   for(const t of legalTargets)legalSet[t.r*8+t.c]=board[t.r][t.c]?'cap':'dot';
   for(let r=0;r<8;r++)for(let c=0;c<8;c++){
@@ -591,19 +592,23 @@ function renderBoard(){
     if(isSel)div.classList.add('selected');
     if(lt==='dot')div.classList.add('legal-dot');
     if(lt==='cap')div.classList.add('legal-cap');
-    div.style.cssText=`left:${c*SQ}px;top:${r*SQ}px;width:${SQ}px;height:${SQ}px;`;
+    const sc=flip?7-c:c, sr=flip?7-r:r;
+    div.style.cssText=`left:${sc*SQ}px;top:${sr*SQ}px;width:${SQ}px;height:${SQ}px;`;
     div.dataset.r=r;div.dataset.c=c;
     const piece=board[r][c];
     if(piece){const img=document.createElement('img');img.className='piece-img';img.src=pieceUrl(piece.color,piece.type);img.alt=piece.color+piece.type;img.draggable=false;div.appendChild(img);}
-    if(c===0){const co=document.createElement('span');co.className='coord rank'+(isLight?'':' on-dark');co.textContent=8-r;div.appendChild(co);}
-    if(r===7){const co=document.createElement('span');co.className='coord file'+(isLight?'':' on-dark');co.textContent=String.fromCharCode('a'.charCodeAt(0)+c);div.appendChild(co);}
+    if(sc===0){const co=document.createElement('span');co.className='coord rank'+(isLight?'':' on-dark');co.textContent=8-r;div.appendChild(co);}
+    if(sr===7){const co=document.createElement('span');co.className='coord file'+(isLight?'':' on-dark');co.textContent=String.fromCharCode('a'.charCodeAt(0)+c);div.appendChild(co);}
     div.addEventListener('click',()=>{if(_suppressClick){_suppressClick=false;return;}onSquareClick(r,c);});
     el.appendChild(div);
   }
 }
 function renderPockets(){
-  renderPocketStrip('pocket-black','b');
-  renderPocketStrip('pocket-white','w');
+  const flip=!!(initialState&&(initialState.turn==='b'||initialState.turn==='black'));
+  // strips are fixed in the layout (pocket-black = top, pocket-white = bottom);
+  // when flipped, the bottom strip shows the attacker's (black's) pocket.
+  renderPocketStrip('pocket-black', flip?'w':'b');
+  renderPocketStrip('pocket-white', flip?'b':'w');
 }
 function renderPocketStrip(elId,color){
   const el=document.getElementById(elId);
@@ -641,11 +646,12 @@ document.getElementById('iboard').addEventListener('pointerdown',e=>{
 });
 
 // ── drag a piece "from hand" (pocket) onto the board ────────────────────────
-function _attachPocketDrag(stripId,color){
+function _attachPocketDrag(stripId){
   const strip=document.getElementById(stripId);if(!strip)return;
   strip.addEventListener('pointerdown',e=>{
     const pp=e.target.closest('.pp');if(!pp)return;
     const piece=pp.dataset.piece;if(!piece)return;
+    const color=pp.dataset.color;                    // displayed color (orientation-aware)
     if(color!==turn)return;                          // only the side to move may drop
     if((pockets[color][piece]||0)<=0)return;
     e.preventDefault();_dragMoved=false;_suppressClick=false;
@@ -658,8 +664,8 @@ function _attachPocketDrag(stripId,color){
     renderBoard();renderPockets();
   });
 }
-_attachPocketDrag('pocket-white','w');
-_attachPocketDrag('pocket-black','b');
+_attachPocketDrag('pocket-white');
+_attachPocketDrag('pocket-black');
 
 document.addEventListener('pointermove',e=>{
   if(!_dragging)return;_dragMoved=true;_moveGhost(e.clientX,e.clientY);
@@ -691,8 +697,10 @@ function _sqFromPoint(x,y){
   const rect=document.getElementById('iboard').getBoundingClientRect();
   if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)return null;
   const SQ=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sq'))||48;
-  const c=Math.floor((x-rect.left)/SQ),r=Math.floor((y-rect.top)/SQ);
-  if(c<0||c>7||r<0||r>7)return null;return{r,c};
+  const sc=Math.floor((x-rect.left)/SQ),sr=Math.floor((y-rect.top)/SQ);
+  if(sc<0||sc>7||sr<0||sr>7)return null;
+  const flip=!!(initialState&&(initialState.turn==='b'||initialState.turn==='black'));
+  return{r:flip?7-sr:sr,c:flip?7-sc:sc};
 }
 
 function updateFenInput(){
@@ -851,7 +859,7 @@ function parseFenToGrid(fen){
   }
   return grid;
 }
-function buildMiniBoard(fen,sqSize){
+function buildMiniBoard(fen,sqSize,flip){
   const N=8,sz=sqSize*N;
   const wrap=document.createElement('div');
   wrap.style.cssText=`position:relative;width:${sz}px;height:${sz}px;flex-shrink:0`;
@@ -866,9 +874,10 @@ function buildMiniBoard(fen,sqSize){
   const grid=parseFenToGrid(fen);
   for(let r=0;r<8;r++)for(let c=0;c<8;c++){
     const p=grid[r*8+c];if(!p)continue;
+    const sc=flip?7-c:c, sr=flip?7-r:r;
     const img=document.createElement('img');
     img.src=pieceUrl(p.color,p.type);
-    img.style.cssText=`position:absolute;width:${sqSize}px;height:${sqSize}px;left:${c*sqSize}px;top:${r*sqSize}px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))`;
+    img.style.cssText=`position:absolute;width:${sqSize}px;height:${sqSize}px;left:${sc*sqSize}px;top:${sr*sqSize}px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))`;
     img.draggable=false;wrap.appendChild(img);
   }
   return wrap;
@@ -988,7 +997,7 @@ function buildHitCard(h,i){
   const hcb=document.createElement('div');hcb.className='hcb';
   const psB=document.createElement('div');psB.className='pocket-side pocket-side-top';
   psB.innerHTML=miniPocketImgs(h.pockets_black,'b');hcb.appendChild(psB);
-  if(h.board_fen)hcb.appendChild(buildMiniBoard(h.board_fen,SQ_SM));
+  if(h.board_fen)hcb.appendChild(buildMiniBoard(h.board_fen,SQ_SM,(h.turn==='b'||h.turn==='black')));
   const psW=document.createElement('div');psW.className='pocket-side pocket-side-bot';
   psW.innerHTML=miniPocketImgs(h.pockets_white,'w');hcb.appendChild(psW);
   hi2.appendChild(hcb);
@@ -1143,6 +1152,7 @@ function HitBoard(h, mountEl){
   // states: array of {fen, label, isPuzzle}. Built from the real game once fetched.
   let states=[], curIdx=0, puzzleIdx=0, maxIdx=0;
   let st=_stateFromHit(h);           // initial placeholder = the hit position itself
+  const _hbFlip=(st.turn==='b'||st.turn==='black');   // attacker (solver) at the bottom
   let freePlay=false;
   let selSq=null, selPocket=null, legal=[];
   let _hbDrag=null, _hbMoved=false, _hbSuppress=false;
@@ -1289,16 +1299,16 @@ function HitBoard(h, mountEl){
       const lt=legalSet[r*8+c];
       if(lt==='dot')div.classList.add('legal-dot');
       if(lt==='cap')div.classList.add('legal-cap');
-      div.style.cssText=`position:absolute;left:${c*SQ}px;top:${r*SQ}px;width:${SQ}px;height:${SQ}px`;
+      div.style.cssText=`position:absolute;left:${(_hbFlip?7-c:c)*SQ}px;top:${(_hbFlip?7-r:r)*SQ}px;width:${SQ}px;height:${SQ}px`;
       const p=st.board[r][c];
       if(p){const img=document.createElement('img');img.className='piece-img';img.src=pieceUrl(p.color,p.type);img.draggable=false;div.appendChild(img);}
-      if(c===0){const co=document.createElement('span');co.className='coord rank'+(isLight?'':' on-dark');co.textContent=8-r;div.appendChild(co);}
-      if(r===7){const co=document.createElement('span');co.className='coord file'+(isLight?'':' on-dark');co.textContent=String.fromCharCode(97+c);div.appendChild(co);}
+      if((_hbFlip?c===7:c===0)){const co=document.createElement('span');co.className='coord rank'+(isLight?'':' on-dark');co.textContent=8-r;div.appendChild(co);}
+      if((_hbFlip?r===0:r===7)){const co=document.createElement('span');co.className='coord file'+(isLight?'':' on-dark');co.textContent=String.fromCharCode(97+c);div.appendChild(co);}
       div.addEventListener('click',()=>onSquare(r,c));
       boardEl.appendChild(div);
     }
-    renderPocket(pocketTop,'b');
-    renderPocket(pocketBot,'w');
+    renderPocket(pocketTop,_hbFlip?'w':'b');
+    renderPocket(pocketBot,_hbFlip?'b':'w');
     moveTxt.innerHTML=moveLabel();
     fenBox.textContent=_fenOf(st);
     const atStart=(!freePlay&&curIdx===0),atEnd=(!freePlay&&curIdx===maxIdx);
@@ -1323,8 +1333,9 @@ function HitBoard(h, mountEl){
   function _hbSqFromPoint(x,y){
     const rect=boardEl.getBoundingClientRect();
     if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)return null;
-    const c=Math.floor((x-rect.left)/SQ),r=Math.floor((y-rect.top)/SQ);
-    if(c<0||c>7||r<0||r>7)return null;return{r,c};
+    const sc=Math.floor((x-rect.left)/SQ),sr=Math.floor((y-rect.top)/SQ);
+    if(sc<0||sc>7||sr<0||sr>7)return null;
+    return{r:_hbFlip?7-sr:sr,c:_hbFlip?7-sc:sc};
   }
   function _hbBeginGhost(srcEl,e,color,type){
     srcEl.setPointerCapture(e.pointerId);
@@ -1363,9 +1374,10 @@ function HitBoard(h, mountEl){
     selPocket=null;selSq={r,c};legal=legalTargetsFor(r,c);render();
     _hbBeginGhost(boardEl,e,p.color,p.type);
   });
-  function _hbPocketDown(strip,color,e){
+  function _hbPocketDown(strip,e){
     const pp=e.target.closest('.pp');if(!pp)return;
     const piece=pp.dataset.piece;if(!piece)return;
+    const color=pp.dataset.color;        // displayed color (orientation-aware)
     if(color!==st.turn)return;
     if((st.pockets[color][piece]||0)<=0)return;
     e.preventDefault();_hbMoved=false;_hbSuppress=false;
@@ -1373,8 +1385,8 @@ function HitBoard(h, mountEl){
     selSq=null;selPocket={color,piece};legal=legalDropSquares();render();
     _hbBeginGhost(strip,e,color,piece);
   }
-  pocketTop.addEventListener('pointerdown',e=>_hbPocketDown(pocketTop,'b',e));
-  pocketBot.addEventListener('pointerdown',e=>_hbPocketDown(pocketBot,'w',e));
+  pocketTop.addEventListener('pointerdown',e=>_hbPocketDown(pocketTop,e));
+  pocketBot.addEventListener('pointerdown',e=>_hbPocketDown(pocketBot,e));
   [boardEl,pocketTop,pocketBot].forEach(el=>{
     el.addEventListener('pointermove',_hbMove);
     el.addEventListener('pointerup',_hbUp);
@@ -1721,7 +1733,7 @@ function _renderRerankCards(scored){
     }
     const boardWrap=document.createElement('div');
     boardWrap.className='rr-card-board';
-    if(h.board_fen)boardWrap.appendChild(buildMiniBoard(h.board_fen,SQ_SM));
+    if(h.board_fen)boardWrap.appendChild(buildMiniBoard(h.board_fen,SQ_SM,(h.turn==='b'||h.turn==='black')));
     card.appendChild(boardWrap);
     const info=document.createElement('div');info.className='rr-card-info';
     const sol=Array.isArray(h.solution_san)?h.solution_san:[];
