@@ -412,7 +412,7 @@ let moveHistory=[],historyIdx=-1,initialState=null;
 let currentQueryId=null,currentField='text_all';
 let hitLabels={};            // id -> 'similar' | 'different'  (absent/'' = unmarked)
 let _activeHitNav=null;      // set while a hit card is expanded → drives ←/→ keys
-let lastHits=[],lastQueryFen='',rrLabelFilter={sim:true,diff:true},rrLabels={};
+let lastHits=[],lastQueryFen='',displayOrderIds=[],rrLabelFilter={sim:true,diff:true},rrLabels={};
 let weights={bm25:0.25,tactic:0.30,move:0.25,matingpiece:0.10,first_act:0.05,pvlen:0.05,droppcs:0.00,pocket_sim:0.00,rating:0.00};
 
 let activeTab='search';
@@ -908,6 +908,7 @@ function searchByCurrentPosition(){doSearch();}
 function _shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 function renderHits(hits){
   const area=document.getElementById('hits-area');
+  displayOrderIds=(hits||[]).map(h=>h.id);   // export follows the order shown on screen
   _expandedCardId=null;_origParent=null;_origNextSib=null;   // clear stale expansion state on re-render
   if(!hits||!hits.length){area.innerHTML='<div class="ph"><div class="ico">🤷</div><div>No hits found</div></div>';return;}
   const grid=document.createElement('div');
@@ -1457,13 +1458,20 @@ function updateExportBar(){
 
 async function exportLabels(){
   if(!lastHits.length)return;
-  // send an explicit per-hit label map; backend writes "similar" / "different" / ""
+  // export rows in the order shown on screen; fall back to BM25 order if unset
+  const idSet=new Set(lastHits.map(h=>h.id));
+  let order=(displayOrderIds||[]).filter(id=>idSet.has(id));
+  // append any hits that (for whatever reason) weren't on screen, so none are lost
+  for(const h of lastHits)if(!order.includes(h.id))order.push(h.id);
+  // true BM25 rank per hit (lastHits is the original BM25 order) — kept as a field
+  const bm25_ranks={};lastHits.forEach((h,i)=>{bm25_ranks[h.id]=i+1;});
   const labels={};
   for(const h of lastHits){if(hitLabels[h.id])labels[h.id]=hitLabels[h.id];}
   const payload={
     query_id:    currentQueryId||'',
     query_fen:   lastQueryFen,         // the FEN that was searched
-    all_hit_ids: lastHits.map(h=>h.id),
+    all_hit_ids: order,                // ← display order (what the expert saw)
+    bm25_ranks:  bm25_ranks,           // id -> true BM25 rank, independent of row order
     labels:      labels,               // id -> "similar" | "different"; missing = ""
   };
   try{
@@ -1608,6 +1616,8 @@ function _setRrCacheStatus(cacheUsed){
 function _renderRerankCards(scored){
   const wrap=document.getElementById('rr-cards');
   const pinned=scored.find(h=>h._origRank===0);
+  // export follows the re-ranked order shown here (pinned first), independent of the label filter
+  displayOrderIds=(pinned?[pinned,...scored.filter(h=>h.id!==pinned.id)]:scored).map(h=>h.id);
   const rest=scored.filter(h=>h._origRank!==0).filter(h=>{
     const lbl=rrLabels[h.id];
     if(lbl==='sim'&&!rrLabelFilter.sim)return false;

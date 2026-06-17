@@ -1093,6 +1093,10 @@ def export_labels():
     if not all_hit_ids:
         return jsonify({"error": "no hits provided"}), 400
 
+    # true BM25 rank per candidate (independent of the row order, which now follows
+    # the on-screen display order). Falls back to row position if not supplied.
+    bm25_ranks = dict(data.get("bm25_ranks") or {})
+
     q_doc = _lucene_doc(query_id) if query_id and query_id != "search_by_fen" and query_id != "rerank_search" else None
     out   = io.StringIO()
 
@@ -1105,7 +1109,8 @@ def export_labels():
             "query_id":               query_id,
             "candidate_id":           hit_id,
             "label":                  lab,   # "similar" | "different" | ""
-            "bm25_rank":              rank,
+            "display_rank":           rank,  # position as shown on screen / in this file
+            "bm25_rank":              bm25_ranks.get(hit_id, rank),  # true BM25 rank
             # query_fen: prefer the live FEN from the frontend over the stored doc FEN
             "query_fen":              query_fen or (q_doc.get("board_fen") if q_doc else ""),
             "candidate_fen":          h_doc.get("board_fen", ""),
