@@ -313,6 +313,23 @@ def _parse_pocket(p):
 
 _PIECE_ORDER = "QRBNP"
 
+def _dedup_hits(hits: list[dict]) -> list[dict]:
+    """
+    Remove duplicate Lucene hits based on document ID.
+    Keeps first occurrence (BM25 order preserved).
+    """
+    seen = set()
+    out = []
+    for h in hits:
+        hid = h.get("id")
+        if not hid:
+            continue
+        if hid in seen:
+            continue
+        seen.add(hid)
+        out.append(h)
+    return out
+
 def _pocket_str(pw, pb) -> str:
     """Crazyhouse FEN pocket string: white pieces uppercase, black lowercase."""
     def side(d, upper):
@@ -849,6 +866,7 @@ def search_by_fen():
             except Exception as e:
                 print(f"Ranker scoring failed, falling back to BM25 order: {e}")
                 hits = hits[:topk]
+        hits = _dedup_hits(hits)
         return jsonify({
             "query": {
                 "id":            query_id,
