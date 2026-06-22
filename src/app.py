@@ -28,6 +28,15 @@ from flask_cors import CORS
 from encode   import encode_static, encode_pockets
 from encodev2 import encode_dynamic_v2, encode_corpus_fields
 
+try:
+    import joblib
+    import pandas as pd
+    import pair_features as pf      # shared train/serve feature module (same one the notebook uses)
+    _HAS_RANKER = True
+except Exception as _e:
+    _HAS_RANKER = False
+    print(f"Supervised search ranker disabled (import failed: {_e})")
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -260,6 +269,35 @@ def _load_cache() -> bool:
 _load_cache()
 
 # ---------------------------------------------------------------------------
+# Supervised search ranker (learned from expert-eval exports)
+# ---------------------------------------------------------------------------
+_ranker      = None    # bare sklearn estimator/pipeline from the notebook
+_ranker_meta = None    # retrieval_model_meta.json (feature order + model type)
+
+def _load_ranker():
+    """Load the notebook's retrieval_model.joblib + retrieval_model_meta.json
+    from CACHE_DIR. Optional: if absent the default search keeps its original
+    fast static-only behaviour."""
+    global _ranker, _ranker_meta
+    if not _HAS_RANKER or _ranker is not None:
+        return
+    model_path = CACHE_DIR / "retrieval_model.joblib"
+    meta_path  = CACHE_DIR / "retrieval_model_meta.json"
+    if model_path.exists():
+        try:
+            _ranker = joblib.load(str(model_path))          # bare estimator/pipeline
+            if meta_path.exists():
+                _ranker_meta = json.load(open(meta_path))
+            feats = (_ranker_meta or {}).get("feature_names", pf.FEATURE_NAMES)
+            mname = (_ranker_meta or {}).get("model_type", type(_ranker).__name__)
+            print(f"Search ranker loaded: {mname} ({len(feats)} features)")
+        except Exception as e:
+            print(f"Search ranker load failed: {e}")
+            _ranker = None
+
+_load_ranker()
+
+# ---------------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------------
 app = Flask(__name__, static_folder=str(STATIC_DIR))
@@ -419,6 +457,7 @@ def _format_hit(h: dict, rank: int) -> dict:
         "solution_uci":     solution_uci,
         "engine_verified":  h.get("engine_verified", False),
         "text_dynamic":     h.get("text_dynamic", ""),
+        "text_static":      h.get("text_static", ""),
         "white":            h.get("white"),
         "black":            h.get("black"),
         "white_elo":        h.get("white_elo"),
@@ -434,6 +473,60 @@ def _format_hit(h: dict, rank: int) -> dict:
         "pv":               solution_san,
         "played_move":      None,
     }
+
+
+def _placement_only(fen: str) -> str:
+    """8-rank piece placement, stripping a [..] pocket OR a 9th /-rank pocket."""
+    bf = (fen or "").split(" ")[0]
+    if "[" in bf:
+        bf = bf.split("[")[0]
+    parts = bf.split("/")
+    if len(parts) == 9:          # 9th rank is a pocket, not a board rank
+        parts = parts[:8]
+    return "/".join(parts)
+
+def _pocket_from_fen_seg(fen: str):
+    """Parse pocket pieces from a [..] segment or a 9th /-rank. Returns (pw,pb) dicts."""
+    s0 = (fen or "").split(" ")[0]
+    seg = ""
+    if "[" in s0 and "]" in s0:
+        seg = s0[s0.index("[") + 1:s0.index("]")]
+    else:
+        parts = s0.split("/")
+        if len(parts) == 9:
+            seg = parts[8]
+    pw, pb = {}, {}
+    for ch in seg:
+        if ch.isupper():   pw[ch] = pw.get(ch, 0) + 1
+        elif ch.islower(): pb[ch.upper()] = pb.get(ch.upper(), 0) + 1
+    return pw, pb
+
+def _pos_key(board_fen: str, fen: str, pw, pb):
+    """Canonical (placement, pocket) identity for a position, tolerant of the
+    different pocket serialisations the corpus and the board editor produce."""
+    placement = _placement_only(board_fen or fen or "")
+    pkw, pkb  = _parse_pocket(pw), _parse_pocket(pb)
+    if not pkw and not pkb:                     # pockets not in the dicts -> read the FEN
+        for _cand in (board_fen, fen):          # board_fen may be stripped; fen may carry it
+            pkw, pkb = _pocket_from_fen_seg(_cand or "")
+            if pkw or pkb:
+                break
+    return placement, _pocket_str(pkw, pkb)     # _pocket_str canonicalises piece order
+
+def _drop_self_hit(hits: list, board_fen: str, pw, pb, query_fen: str = "") -> list:
+    """Remove the query's own position from a hit list so a corpus query
+    doesn't retrieve itself as a perfect self-match. Matches on normalised
+    board placement + pocket contents (ignores which game it came from and
+    how the pocket happens to be serialised)."""
+    qkey = _pos_key(board_fen, query_fen, pw, pb)
+    out = []
+    for h in hits:
+        hkey = _pos_key(h.get("board_fen", ""), h.get("fen", ""),
+                        h.get("pockets_white", {}), h.get("pockets_black", {}))
+        if hkey == qkey:
+            continue
+        out.append(h)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -620,11 +713,86 @@ def retrieve(doc_id: str):
     return jsonify({"query": _format_hit(q_hit, 0), "hits": hits})
 
 
+def _build_query_rec(q, board_fen, pw, pb, ref_turn, fallback_fen=""):
+    """Query-side record for the supervised ranker. Uses a full FEN (board +
+    pockets + turn) so FEN-derived features match the training export."""
+    q_mate = (len(q["solution_uci"]) + 1) // 2 if q.get("solution_uci") else None
+    return {
+        "text_static":  " ".join(q["static_tokens"] + q["pocket_tokens"]),
+        "text_dynamic": q["text_dynamic"],
+        "solution_uci": q["solution_uci"],
+        "mate":         q_mate,
+        "turn":         ref_turn,
+        "rating":       0,
+        "fen":          _full_fen(board_fen, pw, pb, ref_turn) or fallback_fen,
+        "pockets_self": _pocket_multiset(pw if ref_turn == "white" else pb),
+    }
+
+
+def _model_scores(query_rec, hits):
+    """P(similar) for each hit from the supervised ranker, or None if the ranker
+    is unavailable or scoring fails. Candidate FENs are rebuilt from board_fen +
+    pockets (the corpus has no 'fen' field) so FEN-derived features match the
+    training export. Shared by the search and re-rank paths so both score
+    identically."""
+    if not (_HAS_RANKER and _ranker is not None) or not hits:
+        return None
+    feat_names = (_ranker_meta or {}).get("feature_names", pf.FEATURE_NAMES)
+    rows = []
+    for h in hits:
+        cstatic = h.get("text_static", "")
+        cboard  = h.get("board_fen", "")
+        if not cstatic or not cboard:
+            # search hits may omit static tokens / board_fen -> fetch the doc once
+            doc = _lucene_doc(h.get("id", "")) or {}
+            if not cstatic:
+                cstatic = doc.get("text_static", "")
+                h["text_static"] = cstatic
+            if not cboard:
+                cboard = doc.get("board_fen", "")
+                h["board_fen"] = cboard
+                if not h.get("pockets_white"):
+                    h["pockets_white"] = _parse_pocket(doc.get("pockets_white", {}))
+                if not h.get("pockets_black"):
+                    h["pockets_black"] = _parse_pocket(doc.get("pockets_black", {}))
+        h_turn = h.get("turn") or "white"
+        cand_fen = (_full_fen(cboard, h.get("pockets_white") or {},
+                              h.get("pockets_black") or {}, h_turn)
+                    if cboard else h.get("fen", ""))
+        cand_rec = {
+            "text_static":  cstatic,
+            "text_dynamic": h.get("text_dynamic", ""),
+            "solution_uci": h.get("solution_uci", []),
+            "mate":         h.get("mate_in"),
+            "turn":         h_turn,
+            "rating":       h.get("game_rating_avg"),
+            "fen":          cand_fen,
+            "pockets_self": _pocket_multiset(
+                h.get("pockets_white") if h_turn == "white"
+                else h.get("pockets_black")),
+        }
+        fd = pf.pair_features(query_rec, cand_rec)
+        rows.append([fd.get(k, 0.0) for k in feat_names])
+    try:
+        Xq = pd.DataFrame(rows, columns=feat_names)
+        return [float(p) for p in _ranker.predict_proba(Xq)[:, 1]]
+    except Exception as e:
+        print(f"Model scoring failed: {e}")
+        return None
+
+
 @app.route("/api/search_by_fen", methods=["POST"])
 def search_by_fen():
     """
-    Standard BM25 search using static tokens only.
-    Fast — no engine call.
+    Default search.
+
+    Two modes:
+      * ranker present  -> engine-encode the query, retrieve a WIDE BM25 pool
+        on text_all (static+dynamic+pocket), score every candidate with the
+        supervised model and return the top-K. This is what raises the number
+        of similar games in the shown 10: a match BM25 buried at rank ~70 can
+        now be pulled into the top 10 on tactical/engine similarity.
+      * ranker absent   -> original fast static-only BM25 top-K (unchanged).
     """
     data      = request.get_json()
     raw_fen   = (data.get("board_fen") or data.get("fen") or "").strip()
@@ -635,13 +803,69 @@ def search_by_fen():
     if len(parts) == 9:
         board_fen = "/".join(parts[:8])
 
-    topk = int(data.get("topk", 10))
+    topk        = int(data.get("topk", 10))
+    pool_k      = int(data.get("pool_k", 100))    # wide pool the model reranks
+    movetime_ms = int(data.get("movetime_ms", 1500))
     if not board_fen:
         return jsonify({"error": "board_fen required"}), 400
 
-    pw = data.get("pockets_white", {})
-    pb = data.get("pockets_black", {})
+    pw = data.get("pockets_white")
+    pb = data.get("pockets_black")
+    if not pw and not pb:
+        # the default-search frontend sends only {fen}; recover the query pockets
+        # from the FEN ([..] bracket or 9th rank) so encoding, the pocket features
+        # and the self-match filter all see them
+        _b, pw, pb, _t = _fen_board_and_pockets(raw_fen)
+    pw = pw or {}
+    pb = pb or {}
 
+    query_id = "qfen_" + hashlib.sha1((raw_fen or board_fen).encode("utf-8")).hexdigest()[:12]
+    use_ranker = bool(_HAS_RANKER and _ranker is not None)
+
+    if use_ranker:
+        # 1) engine-encode the query so it has dynamic/tactical tokens
+        q = _encode_query(board_fen, raw_fen, pw, pb, movetime_ms=movetime_ms)
+        ref_turn = "black" if " b " in (raw_fen or "") else "white"
+        # 2) WIDE retrieval on text_all (dynamic*3 + pocket*2 + static*1)
+        query_tokens = " ".join(
+            q["dynamic_tokens"] * 3 + q["pocket_tokens"] * 2 + q["static_tokens"]
+        )
+        raw_hits = _lucene_search(query_tokens, "text_all", pool_k)
+        hits = [_format_hit(h, i + 1) for i, h in enumerate(raw_hits)]
+        hits = _drop_self_hit(hits, board_fen, pw, pb, raw_fen)
+        if hits:
+            try:
+                query_rec = _build_query_rec(q, board_fen, pw, pb, ref_turn,
+                                             fallback_fen=raw_fen)
+                probs = _model_scores(query_rec, hits)
+                if probs is not None:
+                    for h, p in zip(hits, probs):
+                        h["bm25_rank"] = h.get("rank")
+                        h["_score"]    = round(p, 4)
+                    hits.sort(key=lambda x: -x["_score"])
+                hits = hits[:topk]
+                for i, h in enumerate(hits):
+                    h["rank"] = i + 1
+            except Exception as e:
+                print(f"Ranker scoring failed, falling back to BM25 order: {e}")
+                hits = hits[:topk]
+        return jsonify({
+            "query": {
+                "id":            query_id,
+                "board_fen":     board_fen,
+                "pockets_white": pw,
+                "pockets_black": pb,
+                "site":          "",
+                "ply":           0,
+                "lichess_url":   "",
+            },
+            "ranker_used": True,
+            "engine_used": q["engine_used"],
+            "pool_k":      pool_k,
+            "hits": hits,
+        })
+
+    # ---- fallback: original fast static-only path ----------------------
     try:
         static_tokens = encode_static(board_fen)
         pocket_tokens = encode_pockets(pw, pb)
@@ -649,12 +873,9 @@ def search_by_fen():
     except Exception as e:
         return jsonify({"error": f"encoding failed: {e}"}), 500
 
-    raw_hits = _lucene_search(query_tokens, "text_static", topk)
+    raw_hits = _lucene_search(query_tokens, "text_static", topk + 2)
     hits = [_format_hit(h, i+1) for i, h in enumerate(raw_hits)]
-
-    # stable, unique id for this query position (same FEN → same id) so exports are
-    # identifiable instead of all sharing the "search_by_fen" placeholder.
-    query_id = "qfen_" + hashlib.sha1((raw_fen or board_fen).encode("utf-8")).hexdigest()[:12]
+    hits = _drop_self_hit(hits, board_fen, pw, pb, raw_fen)[:topk]
 
     return jsonify({
         "query": {
@@ -666,6 +887,7 @@ def search_by_fen():
             "ply":           0,
             "lichess_url":   "",
         },
+        "ranker_used": False,
         "hits": hits,
     })
 
@@ -832,6 +1054,11 @@ def _rerank_search_impl():
     full_fen     = raw_fen   # keep the full FEN with pockets for the engine
     pw           = data.get("pockets_white", {})
     pb           = data.get("pockets_black", {})
+    if not pw and not pb:
+        # recover query pockets from the FEN if the client didn't send them
+        _b, pw, pb, _t = _fen_board_and_pockets(raw_fen)
+    pw = pw or {}
+    pb = pb or {}
     w            = data.get("weights", {})
     candidate_k  = int(data.get("candidate_k", 50))
     return_k     = int(data.get("return_k", 10))
@@ -850,8 +1077,9 @@ def _rerank_search_impl():
         q["pocket_tokens"]  * 2 +
         q["static_tokens"]
     )
-    raw_hits = _lucene_search(query_tokens, "text_all", candidate_k)
+    raw_hits = _lucene_search(query_tokens, "text_all", candidate_k + 2)
     hits     = [_format_hit(h, i+1) for i, h in enumerate(raw_hits)]
+    hits     = _drop_self_hit(hits, board_fen, pw, pb, full_fen)
 
     if not hits:
         return jsonify({
@@ -873,8 +1101,9 @@ def _rerank_search_impl():
     w_firstact = float(w.get("first_act",   0.05))
     w_pvlen    = float(w.get("pvlen",       0.05))
     w_rating   = float(w.get("rating",      0.00))
+    w_model    = float(w.get("model",       1.00))   # supervised ranker (dominant by default)
     total_w    = (w_bm25 + w_feat + w_move + w_matingpc + w_droppcs +
-                  w_pocket + w_firstact + w_pvlen + w_rating) or 1.0
+                  w_pocket + w_firstact + w_pvlen + w_rating + w_model) or 1.0
 
     # Query reference values (from engine line)
     ref_tokens  = _parse_dynamic_tokens(q["text_dynamic"])
@@ -885,6 +1114,11 @@ def _rerank_search_impl():
     ref_first   = _first_action_from_tokens(ref_tokens)
     ref_turn    = "black" if " b " in full_fen else "white"
     ref_pocket  = _pocket_multiset(pw if ref_turn == "white" else pb)
+
+    # supervised model probability per candidate (same scorer as the search tab,
+    # with candidate FENs rebuilt from board_fen + pockets). None if no model.
+    _q_rec      = _build_query_rec(q, board_fen, pw, pb, ref_turn, fallback_fen=full_fen)
+    model_probs = _model_scores(_q_rec, hits)
 
     # Build query feature vector for cache-based Jaccard
     q_feat_vec  = None
@@ -979,6 +1213,9 @@ def _rerank_search_impl():
         else:
             s_rating = 0.5
 
+        # Supervised model P(similar) for this candidate (neutral if no model)
+        s_model = model_probs[i] if model_probs is not None else 0.5
+
         combined = (
             w_bm25     * s_bm25     +
             w_feat     * s_feat     +
@@ -988,13 +1225,15 @@ def _rerank_search_impl():
             w_pocket   * s_pocket   +
             w_firstact * s_firstact +
             w_pvlen    * s_pvlen    +
-            w_rating   * s_rating
+            w_rating   * s_rating   +
+            w_model    * s_model
         ) / total_w
 
         results.append({
             **h,
             "bm25_rank": i + 1,
             "_combined": round(combined, 4),
+            "_model":    round(s_model, 4),
             "_sub": {
                 "bm25":        round(s_bm25,     4),
                 "tactic":      round(s_feat,     4),
@@ -1005,6 +1244,7 @@ def _rerank_search_impl():
                 "first_act":   round(s_firstact, 4),
                 "pvlen":       round(s_pvlen,    4),
                 "rating":      round(s_rating,   4),
+                "model":       round(s_model,    4),
             },
         })
 
@@ -1016,6 +1256,7 @@ def _rerank_search_impl():
         "solution_dyn_tokens": list(ref_tokens)[:30],  # preview for debugging
         "candidate_k":  candidate_k,
         "cache_used":   q_feat_vec is not None,
+        "model_used":   model_probs is not None,
         "hits":         results[:return_k],
     })
 

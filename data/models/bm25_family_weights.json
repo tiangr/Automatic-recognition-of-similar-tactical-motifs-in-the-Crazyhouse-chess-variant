@@ -1,0 +1,12 @@
+{
+  "family_weights": {
+    "placement": 2,
+    "relation": 2,
+    "motif": 4,
+    "pocket": 4,
+    "pv": 2,
+    "dyn": 2,
+    "sum": 3
+  },
+  "note": "Token repetition counts per family for the Lucene query. pv/dyn/sum boost the dynamic-line tokens; placement/relation/motif boost the static tokens; pocket boosts drop-material tokens."
+}
