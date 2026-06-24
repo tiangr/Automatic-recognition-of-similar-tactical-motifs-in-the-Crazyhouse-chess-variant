@@ -313,7 +313,9 @@ def _line_stats(fen, solution_uci, turn):
     Uses python-chess when available; falls back to UCI-only labels."""
     uci = [str(u) for u in (solution_uci or [])]
     out = {"actions": [], "n_drops": sum(1 for u in uci if "@" in u),
-           "sac": None, "player_caps": None, "opp_caps": None, "rich": False}
+           "sac": None, "player_caps": None, "opp_caps": None, "rich": False,
+           "mate_king_sq": None, "mate_piece_sq": None,
+           "cap_sqs": frozenset(), "checkers": frozenset()}
     if not uci:
         return out
     if _HAS_CHESS:
@@ -325,6 +327,7 @@ def _line_stats(fen, solution_uci, turn):
                 seq = []
                 sac = 0.0
                 pcaps = ocaps = 0
+                cap_sqs = set(); checkers = set(); last_mover_to = None
                 for idx, u in enumerate(uci):
                     mv = chess.Move.from_uci(u)
                     if mv not in board.legal_moves and len(u) == 4:
@@ -342,6 +345,8 @@ def _line_stats(fen, solution_uci, turn):
                         break
                     mover = board.turn
                     is_cap = board.is_capture(mv)
+                    if is_cap and mv.to_square is not None:
+                        cap_sqs.add(mv.to_square)        # squares where exchanges happen
                     cap_val = 0.0
                     if is_cap and mv.drop is None:
                         if board.is_en_passant(mv):
@@ -365,6 +370,12 @@ def _line_stats(fen, solution_uci, turn):
                     elif board.is_check():
                         lab += "+"
                     seq.append(lab)
+                    if mover == mating_side:
+                        last_mover_to = mv.to_square
+                        if "#" in lab or "+" in lab:          # this move gave check/mate
+                            pc2 = board.piece_at(mv.to_square)
+                            if pc2 is not None:
+                                checkers.add(pc2.symbol().upper())
                     # defender capturing => the mating side lost that material
                     if mover != mating_side and cap_val:
                         sac += cap_val
@@ -375,6 +386,11 @@ def _line_stats(fen, solution_uci, turn):
                     out["player_caps"] = pcaps
                     out["opp_caps"] = ocaps
                     out["rich"] = True
+                    out["cap_sqs"] = frozenset(cap_sqs)
+                    out["checkers"] = frozenset(checkers)
+                    if board.is_checkmate():
+                        out["mate_king_sq"]  = board.king(board.turn)   # mated king square
+                        out["mate_piece_sq"] = last_mover_to            # square the mate lands on
                     return out
             except Exception:
                 pass
@@ -659,6 +675,22 @@ def pair_features(query: dict, cand: dict) -> dict:
     qr = query.get("rating") or 0.0
     cr = cand.get("rating") or 0.0
     feats["rating_absdiff"] = float(abs(qr - cr)) / 1000.0  # scaled
+
+    # --- expert-feedback features (iteration 5; validated on the critical pairs) ---
+    # The expert's reasoning about "similar" mates reduced to: same square the king
+    # is mated on, same square the mating piece lands on, exchanges on shared squares,
+    # and the same kind of pieces giving check. (square index: rank = sq>>3, file = sq&7)
+    qk, ck = q_st.get("mate_king_sq"), c_st.get("mate_king_sq")
+    if qk is not None and ck is not None:
+        feats["fb_same_mate_sq"]   = 1.0 if qk == ck else 0.0
+        feats["fb_same_mate_rank"] = 1.0 if (qk >> 3) == (ck >> 3) else 0.0
+        feats["fb_same_mate_file"] = 1.0 if (qk & 7) == (ck & 7) else 0.0
+    else:
+        feats["fb_same_mate_sq"] = feats["fb_same_mate_rank"] = feats["fb_same_mate_file"] = 0.0
+    qp, cp = q_st.get("mate_piece_sq"), c_st.get("mate_piece_sq")
+    feats["fb_same_matepiece_sq"] = 1.0 if (qp is not None and cp is not None and qp == cp) else 0.0
+    feats["fb_capsq_jac"]   = _jaccard(set(q_st.get("cap_sqs") or ()), set(c_st.get("cap_sqs") or ()))
+    feats["fb_checker_jac"] = _jaccard(set(q_st.get("checkers") or ()), set(c_st.get("checkers") or ()))
 
     return feats
 

@@ -1,18 +1,23 @@
 """
 unsupervised_clustering.py
 --------------------------
-Unsupervised learning on puzzle_features_mates.parquet.
+Unsupervised learning on puzzle_features_checkmates5_deduped.parquet.
 Clusters Crazyhouse mate positions to discover natural tactical groups
 without any labels.
 
+Memory strategy (avoids the 9 GiB OOM on 5M × 247 float64):
+  • Scaler + PCA are FIT on a bounded sample (FIT_SAMPLE rows, float32).
+  • The full dataset is TRANSFORMED + clustered in chunks — peak RAM is
+    roughly  chunk_size × n_components × 4 bytes, well under 1 GB.
+  • Silhouette is computed on a sample (SILL_SAMPLE), not the full set.
+
 Steps:
-  1. Load features
-  2. Select numeric feature columns (drop metadata)
-  3. Standardize
-  4. Reduce dimensions with PCA
-  5. Cluster with KMeans
-  6. Analyze and label clusters
-  7. Save results to puzzle_features_mates_clustered.parquet
+  1. Load metadata + feature column list (no feature values yet)
+  2. Load FIT_SAMPLE rows → fit StandardScaler + IncrementalPCA
+  3. Transform full dataset in CHUNK_SIZE chunks → assign cluster labels
+  4. Analyse / name clusters (mean features per cluster, computed in chunks)
+  5. Generate plots (elbow, PCA scatter, heatmap)
+  6. Save clustered parquet (metadata + cluster columns only)
 
 Usage:
     python unsupervised_clustering.py
@@ -25,26 +30,32 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans, MiniBatchKMeans
+from sklearn.decomposition import IncrementalPCA
+from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import silhouette_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 warnings.filterwarnings("ignore")
 
-ROOT        = Path(__file__).resolve().parents[1]
-INP         = ROOT / "data" / "derived" / "puzzle_features_mates.parquet"
-OUT         = ROOT / "data" / "derived" / "puzzle_features_mates_clustered.parquet"
-OUT_SUMMARY = ROOT / "data" / "derived" / "cluster_summary.csv"
-OUT_PLOTS   = ROOT / "data" / "derived"
+# ---------------------------------------------------------------------------
+# Paths  — edit ROOT if you run from outside the src/ directory
+# ---------------------------------------------------------------------------
+ROOT        = Path(r"C:\Users\tgrum\Desktop\magistrska\crazyhouse")
+DERIVED     = ROOT / "data" / "derived"
+INP         = DERIVED / "puzzle_features_checkmates5_deduped.parquet"
+OUT         = DERIVED / "puzzle_features_checkmates5_clustered_deduped.parquet"
+OUT_SUMMARY = DERIVED / "cluster_summary.csv"
+OUT_PLOTS   = DERIVED
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-N_CLUSTERS   = 10      # number of clusters — tune this
-PCA_VARIANCE = 0.95    # keep components explaining 95% of variance
-SAMPLE_SIZE  = 200_000 # use a sample for silhouette scoring (expensive on 4M rows)
+N_CLUSTERS   = 10        # number of clusters — tune after seeing the elbow curve
+PCA_VARIANCE = 0.95      # keep components explaining this fraction of variance
+FIT_SAMPLE   = 300_000   # rows used to FIT scaler + PCA  (keeps RAM low)
+CHUNK_SIZE   = 50_000    # rows processed at a time during transform + predict
+SILL_SAMPLE  = 50_000    # rows used for silhouette score (expensive)
 RANDOM_STATE = 42
 
 # Metadata columns — excluded from feature matrix
@@ -53,63 +64,40 @@ META_COLS = [
     "pockets_white_raw", "pockets_black_raw",
 ]
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def get_feature_cols(df: pd.DataFrame) -> list:
-    """Return numeric feature columns, excluding metadata."""
     return [c for c in df.columns
             if c not in META_COLS
             and pd.api.types.is_numeric_dtype(df[c])]
 
 
-def describe_cluster(df_cluster: pd.DataFrame, feat_cols: list) -> pd.Series:
-    """Return mean of each feature for a cluster — useful for naming."""
-    return df_cluster[feat_cols].mean()
-
-
 def name_cluster(means: pd.Series) -> str:
-    """
-    Heuristic cluster name based on dominant features.
-    Looks at drop flags, mate flags, first-action type, pocket size.
-    """
+    """Heuristic label based on dominant features."""
     parts = []
-
-    # First action
-    first_cols = {c: means[c] for c in means.index if c.startswith("dyn_first_") and means[c] > 0.3}
+    first_cols = {c: means[c] for c in means.index
+                  if c.startswith("dyn_first_") and means[c] > 0.3}
     if first_cols:
-        dominant = max(first_cols, key=first_cols.get)
-        parts.append(dominant.replace("dyn_first_", "first:"))
-
-    # Drop flag
+        parts.append(max(first_cols, key=first_cols.get).replace("dyn_first_", "first:"))
     if means.get("DG_!F_drop", 0) > 0.5:
         parts.append("hasDrop")
     else:
         parts.append("noDrop")
-
-    # Drop+ (drop check)
     if means.get("DG_!F_drop+", 0) > 0.4:
         parts.append("dropCheck")
-
-    # Pocket size
-    solver_pocket = means.get("PK_total_solver", 0)
-    if solver_pocket > 2:
-        parts.append(f"pocket>{solver_pocket:.1f}")
-    elif solver_pocket < 0.5:
+    sp = means.get("PK_total_solver", 0)
+    if sp > 2:
+        parts.append(f"pocket>{sp:.1f}")
+    elif sp < 0.5:
         parts.append("emptyPocket")
-
-    # PV length
     if means.get("dyn_pvLen_short", 0) > 0.5:
         parts.append("shortMate")
     elif means.get("dyn_pvLen_long", 0) > 0.4:
         parts.append("longMate")
-
-    # Drop piece types
     for p in "NBRQP":
         if means.get(f"dyn_dropHas_{p}", 0) > 0.4:
             parts.append(f"drops{p}")
-
     return " | ".join(parts) if parts else "misc"
 
 
@@ -117,126 +105,184 @@ def name_cluster(means: pd.Series) -> str:
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    # ── 1) Load ──────────────────────────────────────────────────────────────
-    print(f"Loading: {INP}")
-    df = pd.read_parquet(INP)
-    print(f"Shape: {df.shape}")
+    rng = np.random.default_rng(RANDOM_STATE)
 
-    feat_cols = get_feature_cols(df)
-    print(f"Feature columns: {len(feat_cols)}")
-    print(f"Sample features: {feat_cols[:10]}")
+    # ── 1) Schema pass — learn column list without loading features ───────────
+    print(f"Reading schema: {INP}")
+    schema_df = pd.read_parquet(INP, columns=None).iloc[0:0]   # 0 rows, all cols
+    all_cols   = list(schema_df.columns)
+    feat_cols  = get_feature_cols(schema_df)
+    n_total    = pd.read_parquet(INP, columns=["puzzle_id"]).shape[0]
+    print(f"Total rows  : {n_total:,}")
+    print(f"Feature cols: {len(feat_cols)}")
+    print(f"Sample feats: {feat_cols[:8]}")
     print()
 
-    X = df[feat_cols].values.astype(np.float32)
+    # ── 2) Fit scaler + IncrementalPCA on a sample ───────────────────────────
+    fit_n   = min(FIT_SAMPLE, n_total)
+    fit_idx = np.sort(rng.choice(n_total, fit_n, replace=False))
+    print(f"Fitting scaler + PCA on {fit_n:,} rows (sample)…")
 
-    # ── 2) Standardize ───────────────────────────────────────────────────────
-    print("Standardizing features...")
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    # Read only the rows we need for fitting (via row-group filter workaround:
+    # parquet doesn't support arbitrary row indices, so we read full then sample)
+    fit_df  = pd.read_parquet(INP, columns=feat_cols)
+    fit_X   = fit_df.iloc[fit_idx][feat_cols].fillna(0).values.astype(np.float32)
+    del fit_df  # free memory immediately
 
-    # ── 3) PCA ───────────────────────────────────────────────────────────────
-    print(f"Running PCA (keeping {PCA_VARIANCE*100:.0f}% variance)...")
-    pca = PCA(n_components=PCA_VARIANCE, random_state=RANDOM_STATE)
-    X_pca = pca.fit_transform(X_scaled)
-    print(f"PCA components: {X_pca.shape[1]} (from {X_scaled.shape[1]})")
-    print(f"Explained variance: {pca.explained_variance_ratio_.sum():.3f}")
+    scaler  = StandardScaler()
+    fit_X_s = scaler.fit_transform(fit_X).astype(np.float32)
+    del fit_X
+
+    # Determine n_components from a small PCA trial
+    from sklearn.decomposition import PCA as _PCA
+    trial_n = min(len(feat_cols), fit_X_s.shape[0], 200)
+    trial   = _PCA(n_components=trial_n, random_state=RANDOM_STATE)
+    trial.fit(fit_X_s)
+    cumvar  = np.cumsum(trial.explained_variance_ratio_)
+    n_comp  = int(np.searchsorted(cumvar, PCA_VARIANCE)) + 1
+    n_comp  = max(2, min(n_comp, trial_n))
+    print(f"PCA: {n_comp} components explain ≥{PCA_VARIANCE*100:.0f}% variance "
+          f"(tried up to {trial_n})")
+
+    # Fit the real IncrementalPCA on the same sample in one batch
+    ipca = IncrementalPCA(n_components=n_comp)
+    ipca.fit(fit_X_s)
+    del fit_X_s
+    print(f"Explained variance (sample): {ipca.explained_variance_ratio_.sum():.3f}")
     print()
 
-    # ── 4) Elbow plot (optional, quick) ──────────────────────────────────────
-    print("Computing elbow curve (k=2..15)...")
+    # ── 3) Elbow curve (transform sample once, try k=2..15) ──────────────────
+    print("Elbow curve on sample (k=2..15)…")
+    elbow_df = pd.read_parquet(INP, columns=feat_cols).iloc[fit_idx]
+    elbow_X  = ipca.transform(
+        scaler.transform(elbow_df.fillna(0).values.astype(np.float32))
+    ).astype(np.float32)
+    del elbow_df
+
     inertias = []
-    ks = range(2, 16)
-    for k in ks:
+    for k in range(2, 16):
         km = MiniBatchKMeans(n_clusters=k, random_state=RANDOM_STATE,
-                             batch_size=10_000, n_init=3)
-        km.fit(X_pca)
+                             batch_size=5_000, n_init=3)
+        km.fit(elbow_X)
         inertias.append(km.inertia_)
         print(f"  k={k:2d}  inertia={km.inertia_:.1f}")
 
     plt.figure(figsize=(8, 4))
-    plt.plot(list(ks), inertias, 'bo-')
-    plt.xlabel("Number of clusters (k)")
-    plt.ylabel("Inertia")
+    plt.plot(range(2, 16), inertias, "bo-")
+    plt.xlabel("k"); plt.ylabel("Inertia")
     plt.title("Elbow curve — Crazyhouse mate positions")
     plt.tight_layout()
-    elbow_path = OUT_PLOTS / "elbow_curve.png"
-    plt.savefig(elbow_path, dpi=150)
-    plt.close()
-    print(f"Saved elbow curve: {elbow_path}")
+    plt.savefig(OUT_PLOTS / "elbow_curve.png", dpi=150); plt.close()
+    print(f"Saved: {OUT_PLOTS/'elbow_curve.png'}\n")
+
+    # ── 4) Final clustering — fit on sample, predict in full chunks ───────────
+    print(f"Fitting final MiniBatchKMeans (k={N_CLUSTERS}) on sample…")
+    kmeans = MiniBatchKMeans(
+        n_clusters=N_CLUSTERS, random_state=RANDOM_STATE,
+        batch_size=10_000, n_init=5, max_iter=300,
+    )
+    kmeans.fit(elbow_X)
+    del elbow_X
+
+    print(f"Predicting cluster labels in chunks of {CHUNK_SIZE:,}…")
+    all_labels = np.empty(n_total, dtype=np.int32)
+    full_feat  = pd.read_parquet(INP, columns=feat_cols)   # load features once
+    for start in range(0, n_total, CHUNK_SIZE):
+        end   = min(start + CHUNK_SIZE, n_total)
+        chunk = full_feat.iloc[start:end].fillna(0).values.astype(np.float32)
+        chunk_s   = scaler.transform(chunk).astype(np.float32)
+        chunk_pca = ipca.transform(chunk_s).astype(np.float32)
+        all_labels[start:end] = kmeans.predict(chunk_pca)
+        if (start // CHUNK_SIZE) % 20 == 0:
+            print(f"  …{end:,}/{n_total:,}")
+    del full_feat
     print()
 
-    # ── 5) Final clustering ───────────────────────────────────────────────────
-    print(f"Clustering with k={N_CLUSTERS} (MiniBatchKMeans)...")
-    kmeans = MiniBatchKMeans(
-        n_clusters=N_CLUSTERS,
-        random_state=RANDOM_STATE,
-        batch_size=10_000,
-        n_init=5,
-        max_iter=300,
-    )
-    labels = kmeans.fit_predict(X_pca)
-    df["cluster"] = labels
-    print(f"Cluster sizes:")
+    # ── 5) Load metadata + attach labels ─────────────────────────────────────
+    meta_read = [c for c in META_COLS if c in all_cols]
+    print(f"Loading metadata columns: {meta_read}")
+    df = pd.read_parquet(INP, columns=meta_read)
+    df["cluster"] = all_labels
+
+    print("Cluster sizes:")
     print(df["cluster"].value_counts().sort_index().to_string())
     print()
 
-    # ── 6) Silhouette score on sample ─────────────────────────────────────────
-    print(f"Computing silhouette score on {SAMPLE_SIZE:,} sample...")
-    idx = np.random.default_rng(RANDOM_STATE).choice(
-        len(X_pca), size=min(SAMPLE_SIZE, len(X_pca)), replace=False)
-    sil = silhouette_score(X_pca[idx], labels[idx], sample_size=None)
-    print(f"Silhouette score: {sil:.4f}  (range -1..1, higher=better)")
-    print()
+    # ── 6) Silhouette on sample ───────────────────────────────────────────────
+    sil_n   = min(SILL_SAMPLE, n_total)
+    sil_idx = rng.choice(n_total, sil_n, replace=False)
+    print(f"Silhouette score on {sil_n:,} sample…")
+    feat_sil = pd.read_parquet(INP, columns=feat_cols).iloc[sil_idx]
+    X_sil    = ipca.transform(
+        scaler.transform(feat_sil.fillna(0).values.astype(np.float32))
+    ).astype(np.float32)
+    del feat_sil
+    sil = silhouette_score(X_sil, all_labels[sil_idx])
+    del X_sil
+    print(f"Silhouette: {sil:.4f}  (range −1…1, higher = better)\n")
 
-    # ── 7) Name clusters ──────────────────────────────────────────────────────
+    # ── 7) Name clusters (compute feature means per cluster, chunked) ─────────
+    print("Computing per-cluster feature means (chunked)…")
+    sum_    = np.zeros((N_CLUSTERS, len(feat_cols)), dtype=np.float64)
+    counts  = np.zeros(N_CLUSTERS, dtype=np.int64)
+    feat_df = pd.read_parquet(INP, columns=feat_cols)
+    for start in range(0, n_total, CHUNK_SIZE):
+        end    = min(start + CHUNK_SIZE, n_total)
+        chunk  = feat_df.iloc[start:end].fillna(0).values.astype(np.float32)
+        lbls   = all_labels[start:end]
+        for c in range(N_CLUSTERS):
+            mask = lbls == c
+            if mask.any():
+                sum_[c]    += chunk[mask].sum(axis=0)
+                counts[c]  += mask.sum()
+    del feat_df
+    cluster_means = pd.DataFrame(
+        sum_ / counts[:, None], columns=feat_cols
+    )
+
+    cluster_names  = {}
+    summary_rows   = []
     print("Cluster profiles:")
-    cluster_names = {}
-    summary_rows  = []
-
     for c in range(N_CLUSTERS):
-        mask  = df["cluster"] == c
-        means = describe_cluster(df[mask], feat_cols)
+        means = cluster_means.iloc[c]
         name  = name_cluster(means)
         cluster_names[c] = name
-        size  = mask.sum()
-
-        row = {"cluster": c, "size": size, "name": name,
-               "silhouette": sil}
-        # Add top feature means
-        top = means.nlargest(10)
-        for feat, val in top.items():
-            row[f"mean_{feat}"] = round(val, 3)
+        top   = means.nlargest(10)
+        row   = {"cluster": c, "size": int(counts[c]),
+                 "name": name, "silhouette": round(sil, 4)}
+        for f, v in top.items():
+            row[f"mean_{f}"] = round(v, 3)
         summary_rows.append(row)
-
-        print(f"  Cluster {c:2d} ({size:7,} pos): {name}")
-        print(f"    top features: {dict(top.round(3))}")
-
+        print(f"  Cluster {c:2d} ({int(counts[c]):7,}): {name}")
+        print(f"    top: {dict(top.round(3))}")
     df["cluster_name"] = df["cluster"].map(cluster_names)
+    print()
 
-    # ── 8) PCA scatter plot (first 2 components) ──────────────────────────────
-    print("\nGenerating PCA scatter plot...")
-    # Sample for plot
-    plot_n = min(50_000, len(df))
-    plot_idx = np.random.default_rng(RANDOM_STATE).choice(len(df), plot_n, replace=False)
+    # ── 8) PCA scatter (transform a small sample for the plot) ────────────────
+    print("PCA scatter plot…")
+    plot_n   = min(30_000, n_total)
+    plot_idx = rng.choice(n_total, plot_n, replace=False)
+    feat_plot = pd.read_parquet(INP, columns=feat_cols).iloc[plot_idx]
+    X_plot    = ipca.transform(
+        scaler.transform(feat_plot.fillna(0).values.astype(np.float32))
+    ).astype(np.float32)
+    del feat_plot
+
     plot_df = pd.DataFrame({
-        "PC1":     X_pca[plot_idx, 0],
-        "PC2":     X_pca[plot_idx, 1],
-        "cluster": labels[plot_idx].astype(str),
+        "PC1": X_plot[:, 0], "PC2": X_plot[:, 1],
+        "cluster": all_labels[plot_idx].astype(str),
     })
-
     plt.figure(figsize=(10, 7))
     sns.scatterplot(data=plot_df, x="PC1", y="PC2", hue="cluster",
                     palette="tab10", alpha=0.3, s=5, linewidth=0)
     plt.title(f"Crazyhouse mate positions — PCA + KMeans (k={N_CLUSTERS})")
     plt.tight_layout()
-    scatter_path = OUT_PLOTS / "pca_clusters.png"
-    plt.savefig(scatter_path, dpi=150)
-    plt.close()
-    print(f"Saved scatter plot: {scatter_path}")
+    plt.savefig(OUT_PLOTS / "pca_clusters.png", dpi=150); plt.close()
+    del X_plot
+    print(f"Saved: {OUT_PLOTS/'pca_clusters.png'}")
 
     # ── 9) Feature heatmap per cluster ────────────────────────────────────────
-    print("Generating cluster feature heatmap...")
-    # Pick most discriminative features
+    print("Cluster feature heatmap…")
     important_feats = [
         "DG_!F_checkmate", "DG_!F_drop", "DG_!F_drop+", "DG_!F_px",
         "DG_!F_+", "DG_!F_noDrop",
@@ -249,38 +295,31 @@ def main():
         "DS_!drop_sq_zone_kingside", "DS_!drop_sq_zone_queenside",
         "DS_!drop_sq_zone_back_rank",
     ]
-    # Keep only cols that exist
-    important_feats = [f for f in important_feats if f in df.columns]
+    important_feats = [f for f in important_feats if f in feat_cols]
+    if important_feats:
+        heatmap_data = cluster_means[important_feats]
+        plt.figure(figsize=(14, 6))
+        sns.heatmap(heatmap_data.T, annot=True, fmt=".2f", cmap="YlOrRd",
+                    linewidths=0.5, cbar_kws={"shrink": 0.8})
+        plt.title(f"Mean feature values per cluster (k={N_CLUSTERS})")
+        plt.tight_layout()
+        plt.savefig(OUT_PLOTS / "cluster_heatmap.png", dpi=150); plt.close()
+        print(f"Saved: {OUT_PLOTS/'cluster_heatmap.png'}")
 
-    heatmap_data = df.groupby("cluster")[important_feats].mean()
-    plt.figure(figsize=(14, 6))
-    sns.heatmap(heatmap_data.T, annot=True, fmt=".2f", cmap="YlOrRd",
-                linewidths=0.5, cbar_kws={"shrink": 0.8})
-    plt.title(f"Mean feature values per cluster (k={N_CLUSTERS})")
-    plt.tight_layout()
-    heatmap_path = OUT_PLOTS / "cluster_heatmap.png"
-    plt.savefig(heatmap_path, dpi=150)
-    plt.close()
-    print(f"Saved heatmap: {heatmap_path}")
-
-    # ── 10) Save results ──────────────────────────────────────────────────────
-    print(f"\nSaving clustered data: {OUT}")
-    # Save only metadata + cluster (not full feature matrix to save space)
-    out_cols = META_COLS + ["cluster", "cluster_name"]
-    out_cols = [c for c in out_cols if c in df.columns]
+    # ── 10) Save ──────────────────────────────────────────────────────────────
+    print(f"\nSaving clustered parquet: {OUT}")
+    out_cols = [c for c in META_COLS + ["cluster", "cluster_name"] if c in df.columns]
     df[out_cols].to_parquet(OUT, index=False)
 
-    summary_df = pd.DataFrame(summary_rows)
-    summary_df.to_csv(OUT_SUMMARY, index=False)
+    pd.DataFrame(summary_rows).to_csv(OUT_SUMMARY, index=False)
     print(f"Saved cluster summary: {OUT_SUMMARY}")
 
     print(f"\n{'='*60}")
-    print("DONE")
+    print(f"DONE")
     print(f"  Silhouette score : {sil:.4f}")
     print(f"  Clusters         : {N_CLUSTERS}")
-    print(f"  Total positions  : {len(df):,}")
+    print(f"  Total positions  : {n_total:,}")
     print(f"  Output           : {OUT}")
-    print(f"  Plots            : {OUT_PLOTS}/elbow_curve.png, pca_clusters.png, cluster_heatmap.png")
 
 
 if __name__ == "__main__":

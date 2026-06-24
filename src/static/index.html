@@ -915,10 +915,7 @@ async function doSearch(){
     hitLabels={};
     lastHits=data.hits||[];   // keep BM25 order intact — re-rank tab + export rely on it
     rrLabels={};
-    // TEMP (unbiased expert eval): render search-tab hits in a fresh random order on every
-    // search. Shuffles a COPY only, so lastHits stays in BM25 order and the re-rank tab /
-    // export are untouched. To restore: renderHits(lastHits);
-    renderHits(_shuffle(lastHits.slice()));
+    renderHits(lastHits);
     updateExportBar();
     if(activeTab==='rerank')applyRerank();
   }catch(e){
@@ -930,9 +927,6 @@ async function doSearch(){
 function searchByCurrentPosition(){doSearch();}
 
 // ── HITS ──────────────────────────────────────────────────────────────────────
-// TEMP (unbiased expert eval): Fisher-Yates shuffle, non-deterministic each call so the
-// same query produces a different display order every time. Remove when restoring scores.
-function _shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 function renderHits(hits){
   const area=document.getElementById('hits-area');
   displayOrderIds=(hits||[]).map(h=>h.id);   // export follows the order shown on screen
@@ -1005,8 +999,7 @@ function buildHitCard(h,i){
   const hrk=document.createElement('div');hrk.className='hm';
   hrk.innerHTML=`
     <span class="hrk">Hit #${i+1}</span>
-    <!-- TEMP: HSC score hidden for unbiased expert eval. Restore line below (and remove this comment): -->
-    <!-- <span class="hsc">\${h.score!=null?h.score.toFixed(2):''}</span> -->
+    <span class="hsc">${h.score!=null?h.score.toFixed(2):''}</span>
     ${mate!=null?`<span class="badge mate">M${mate}</span>`:''}
     ${hasDrop?'<span class="badge drop">DROP</span>':''}
     ${h.engine_verified?'<span class="badge verified">✓ ENG</span>':''}

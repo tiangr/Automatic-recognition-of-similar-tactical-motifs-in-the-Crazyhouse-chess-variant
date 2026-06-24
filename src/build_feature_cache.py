@@ -21,11 +21,11 @@ import numpy as np
 import pandas as pd
 
 ROOT        = Path(__file__).resolve().parents[1]
-FEAT_PATH   = ROOT / "data" / "derived" / "puzzle_features_checkmates5.parquet"
+FEAT_PATH   = ROOT / "data" / "derived" / "puzzle_features_checkmates5_deduped.parquet"
 CACHE_DIR   = ROOT / "data" / "models"
-CACHE_NPY   = CACHE_DIR / "feat_matrix_checkmates5.npy"
-CACHE_IDX   = CACHE_DIR / "feat_index_checkmates5.json"   # puzzle_id -> row int
-CACHE_COLS  = CACHE_DIR / "feat_cols_checkmates5.json"    # ordered list of feature col names
+CACHE_NPY   = CACHE_DIR / "feat_matrix_checkmates5_deduped.npy"
+CACHE_IDX   = CACHE_DIR / "feat_index_checkmates5_deduped.json"   # puzzle_id -> row int
+CACHE_COLS  = CACHE_DIR / "feat_cols_checkmates5_deduped.json"    # ordered list of feature col names
 
 META_COLS = [
     "puzzle_id", "site", "ply", "board_fen", "turn",

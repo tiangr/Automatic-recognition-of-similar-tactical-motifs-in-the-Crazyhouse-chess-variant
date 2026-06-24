@@ -54,7 +54,7 @@ NNUE_PATH   = str(next((ROOT / "engines").glob("crazyhouse-*.nnue")))
 # ---------------------------------------------------------------------------
 MATE_IN_PLIES   = 5      # only keep puzzles with exactly 5-ply mating sequence
 MOVETIME_MS     = 5000   # 5s per position — faster test run
-START_FROM_GAME = 5000921   # change to resume from a specific game number... temp.jsonl of 156266 excluding naprej = ko bos mergov fajle
+START_FROM_GAME = 5847357   # change to resume from a specific game number... temp.jsonl of 156266 excluding naprej = ko bos mergov fajle
 WORKERS         = int(os.environ.get("WORKERS", max(1, mp.cpu_count() - 1)))
  
 # Fields to remove from output — leftovers from old pipeline
