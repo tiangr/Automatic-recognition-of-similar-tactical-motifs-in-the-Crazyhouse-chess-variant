@@ -31,7 +31,8 @@ from encodev2 import encode_dynamic_v2, encode_corpus_fields
 try:
     import joblib
     import pandas as pd
-    import pair_features as pf      # shared train/serve feature module (same one the notebook uses)
+    import pair_features as pf3      # shared train/serve feature module (same one the notebook uses)
+    import pair_features_batch3 as pf3
     _HAS_RANKER = True
 except Exception as _e:
     _HAS_RANKER = False
@@ -288,7 +289,7 @@ def _load_ranker():
             _ranker = joblib.load(str(model_path))          # bare estimator/pipeline
             if meta_path.exists():
                 _ranker_meta = json.load(open(meta_path))
-            feats = (_ranker_meta or {}).get("feature_names", pf.FEATURE_NAMES)
+            feats = (_ranker_meta or {}).get("feature_names", pf3.FEATURE_NAMES)
             mname = (_ranker_meta or {}).get("model_type", type(_ranker).__name__)
             print(f"Search ranker loaded: {mname} ({len(feats)} features)")
         except Exception as e:
@@ -754,7 +755,7 @@ def _model_scores(query_rec, hits):
     identically."""
     if not (_HAS_RANKER and _ranker is not None) or not hits:
         return None
-    feat_names = (_ranker_meta or {}).get("feature_names", pf.FEATURE_NAMES)
+    feat_names = (_ranker_meta or {}).get("feature_names", pf3.FEATURE_NAMES)
     rows = []
     for h in hits:
         cstatic = h.get("text_static", "")
@@ -788,7 +789,7 @@ def _model_scores(query_rec, hits):
                 h.get("pockets_white") if h_turn == "white"
                 else h.get("pockets_black")),
         }
-        fd = pf.pair_features(query_rec, cand_rec)
+        fd = pf3.pair_features(query_rec, cand_rec)
         rows.append([fd.get(k, 0.0) for k in feat_names])
     try:
         Xq = pd.DataFrame(rows, columns=feat_names)
