@@ -398,6 +398,84 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 <div id="drag-ghost"><img id="drag-ghost-img" src="" alt=""/></div>
 
 <script>
+/* ── CLIENT ERROR LOG ────────────────────────────────────────────────────────
+   Captures uncaught errors, unhandled promise rejections and console.error(...)
+   into FOUR places so a "crash" leaves a trace:
+     • a red banner (bottom-left) with copy / clear / dismiss
+     • localStorage 'ch_errlog'  → survives a refresh, read it back anytime
+     • window.__ERRLOG (array) and window.dumpErrors() from the JS console
+     • POST /api/clientlog       → lands in journalctl -u crazyhouse (best-effort;
+                                    silently no-ops if that route doesn't exist)
+   Remove this whole <script> block to disable.
+   ──────────────────────────────────────────────────────────────────────────── */
+(function(){
+  const KEY='ch_errlog', MAX=50;
+  let log; try{log=JSON.parse(localStorage.getItem(KEY))||[];}catch(_){log=[];}
+  window.__ERRLOG=log;
+  window.dumpErrors=()=>{try{console.table(log.map(e=>({t:e.t,kind:e.kind,msg:e.msg})));}catch(_){console.log(log);}return log;};
+  window.clearErrors=()=>{log.length=0;try{localStorage.removeItem(KEY);}catch(_){}; if(bar)bar.style.display='none';};
+  function persist(){try{localStorage.setItem(KEY,JSON.stringify(log.slice(-MAX)));}catch(_){}}
+
+  let bar;
+  function render(){
+    if(!document.body)return;
+    if(!bar){
+      bar=document.createElement('div');
+      bar.style.cssText='position:fixed;left:10px;bottom:10px;z-index:99999;max-width:480px;'
+        +'font-family:monospace;font-size:11px;line-height:1.4;background:#2a0d08;color:#ffd9cc;'
+        +'border:1px solid #b5451b;border-radius:6px;padding:8px 10px;box-shadow:0 4px 16px rgba(0,0,0,.45)';
+      document.body.appendChild(bar);
+    }
+    const last=log[log.length-1];
+    if(!last){bar.style.display='none';return;}
+    bar.style.display='block';
+    bar.innerHTML='';
+    const head=document.createElement('div');
+    head.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:4px';
+    const t=document.createElement('b');t.style.color='#ff6b3d';t.style.flex='1';
+    t.textContent='\u26a0 JS error ('+log.length+')';
+    head.appendChild(t);
+    const mkBtn=(txt,fn)=>{const b=document.createElement('button');b.textContent=txt;
+      b.style.cssText='font:inherit;cursor:pointer;background:#b5451b;color:#fff;border:0;border-radius:3px;padding:1px 6px';
+      b.onclick=fn;return b;};
+    head.appendChild(mkBtn('copy',function(){try{navigator.clipboard.writeText(JSON.stringify(log,null,2));this.textContent='copied';}catch(_){}}));
+    head.appendChild(mkBtn('clear',()=>window.clearErrors()));
+    head.appendChild(mkBtn('\u00d7',()=>{bar.style.display='none';}));
+    const msg=document.createElement('div');
+    msg.style.cssText='white-space:pre-wrap;word-break:break-word;max-height:150px;overflow:auto';
+    msg.textContent=last.msg+(last.stack?('\n'+last.stack):'');
+    bar.appendChild(head);bar.appendChild(msg);
+  }
+
+  let beaconOk=true;
+  function record(kind,msg,stack){
+    const e={t:new Date().toISOString(),kind:kind,msg:String(msg==null?'':msg),stack:stack||''};
+    log.push(e); while(log.length>MAX)log.shift();
+    persist(); try{render();}catch(_){}
+    if(beaconOk){
+      try{fetch('/api/clientlog',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(e),keepalive:true}).catch(()=>{beaconOk=false;});}catch(_){beaconOk=false;}
+    }
+  }
+
+  window.addEventListener('error',ev=>{
+    const st=(ev.error&&ev.error.stack)||(ev.filename?ev.filename+':'+ev.lineno+':'+ev.colno:'');
+    record('error', ev.message||(ev.error&&ev.error.message)||ev.error, st);
+  });
+  window.addEventListener('unhandledrejection',ev=>{
+    const r=ev.reason; record('promise',(r&&r.message)||r,(r&&r.stack)||'');
+  });
+  const _ce=console.error.bind(console);
+  console.error=function(){
+    try{const parts=[].map.call(arguments,x=>x&&x.stack?x.stack:(typeof x==='object'?JSON.stringify(x):String(x)));
+        record('console',parts.join(' '));}catch(_){}
+    _ce.apply(console,arguments);
+  };
+
+  if(log.length){ if(document.body)render(); else document.addEventListener('DOMContentLoaded',render); }
+})();
+</script>
+<script>
 const LIGHT_SQ='#f0d9b5',DARK_SQ='#b58863';
 const PKS=['Q','R','B','N','P'];
 
@@ -915,7 +993,10 @@ async function doSearch(){
     hitLabels={};
     lastHits=data.hits||[];   // keep BM25 order intact — re-rank tab + export rely on it
     rrLabels={};
-    renderHits(lastHits);
+    // TEMP (unbiased expert eval): render search-tab hits in a fresh random order on every
+    // search. Shuffles a COPY only, so lastHits stays in BM25 order and the re-rank tab /
+    // export are untouched. To restore: renderHits(lastHits);
+    renderHits(_shuffle(lastHits.slice()));
     updateExportBar();
     if(activeTab==='rerank')applyRerank();
   }catch(e){
@@ -927,6 +1008,9 @@ async function doSearch(){
 function searchByCurrentPosition(){doSearch();}
 
 // ── HITS ──────────────────────────────────────────────────────────────────────
+// TEMP (unbiased expert eval): Fisher-Yates shuffle, non-deterministic each call so the
+// same query produces a different display order every time. Remove when restoring scores.
+function _shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 function renderHits(hits){
   const area=document.getElementById('hits-area');
   displayOrderIds=(hits||[]).map(h=>h.id);   // export follows the order shown on screen
@@ -999,7 +1083,8 @@ function buildHitCard(h,i){
   const hrk=document.createElement('div');hrk.className='hm';
   hrk.innerHTML=`
     <span class="hrk">Hit #${i+1}</span>
-    <span class="hsc">${h.score!=null?h.score.toFixed(2):''}</span>
+    <!-- TEMP: HSC score hidden for unbiased expert eval. Restore line below (and remove this comment): -->
+    <!-- <span class="hsc">\${h.score!=null?h.score.toFixed(2):''}</span> -->
     ${mate!=null?`<span class="badge mate">M${mate}</span>`:''}
     ${hasDrop?'<span class="badge drop">DROP</span>':''}
     ${h.engine_verified?'<span class="badge verified">✓ ENG</span>':''}
@@ -1851,7 +1936,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
   await new Promise(resolve=>{
     const s=document.createElement('script');
     s.src='https://cdn.jsdelivr.net/npm/chess.js@0.10.3/chess.min.js';
-    s.onload=resolve;s.onerror=resolve;document.head.appendChild(s);
+    s.onload=resolve;s.onerror=()=>{console.error('chess.js failed to load from CDN — board/move logic will break until reload');resolve();};document.head.appendChild(s);
   });
   const startFen='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   applyFen(startFen);document.getElementById('fen-input').value=startFen;
