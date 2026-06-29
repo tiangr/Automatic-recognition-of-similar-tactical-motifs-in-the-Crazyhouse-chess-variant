@@ -27,7 +27,7 @@ MIN_PLY = 6   # safety filter — skip extremely short games
 # ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parents[1]
-INP  = ROOT / "data" / "derived" / "checkmates5_verified_filtered.jsonl"
+INP  = ROOT / "data" / "derived" / "checkmates5_600k.jsonl"
 OUT  = ROOT / "data" / "derived" / "corpus_checkmates5.jsonl"
 
 

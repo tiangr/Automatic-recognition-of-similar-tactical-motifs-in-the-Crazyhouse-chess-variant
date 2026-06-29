@@ -170,7 +170,7 @@ def encode_dynamic_v2(rec: dict) -> list[str]:
     except Exception as e:
         return [f"dyn:start_fail:{str(e)}"]
 
-    pv = rec.get("pv_before") or rec.get("pv_prev") or []
+    pv = rec.get("solution_uci") or rec.get("pv_before") or rec.get("pv_prev") or []
     bm = rec.get("bestmove_before") or rec.get("best_prev") or ""
 
     pv_line = list(pv)
@@ -477,14 +477,46 @@ def encode_corpus_fields(rec: dict, static_toks: list[str], pocket_toks: list[st
     general_toks  = [t for t in dyn_tokens if t.startswith(("dyn:", "sum:"))]
     solution_toks = [t for t in dyn_tokens if t.startswith("pv:")]
 
-    text_dyn_gen = " ".join(general_toks)
-    text_dyn_sol = " ".join(solution_toks)
-    text_dyn     = " ".join(dyn_tokens)
-    text_static  = " ".join(static_toks + pocket_toks)
+    # ── Mating picture (matna slika) + king march (forcing sequence) ──────
+    # Both now live inside pair_features.py (merged in to cut down on file
+    # count -- formerly separate mate_picture.py / king_march.py modules).
+    # mate:* tokens are the colour+orientation-folded cage around the mated
+    # king at the FINAL position (same motif collides to one token regardless
+    # of corner/colour). km:* tokens describe the PATH the king is forced
+    # along to get there (which line/square each check comes from, repeated
+    # checkers, drop-vs-move mate, attacker/defender cooperating pieces).
+    #
+    # These are now their OWN token families (not folded into general/dyn), so
+    # they get an independent weight in text_all rather than sharing the dyn
+    # x3. Kept here as a separate motif_toks bucket. NOTE: this corpus-side
+    # weight is STATIC (baked into the index at build time); the *learned*
+    # per-family weighting happens on the QUERY side via FAMILY_WEIGHTS, which
+    # can be re-tuned without a reindex. This boost just ensures the motif
+    # tokens are present and reasonably weighted in the index to begin with.
+    motif_toks = []
+    try:
+        from pair_features import mate_picture_for_rec, king_march_for_rec
+        motif_toks += mate_picture_for_rec(rec).get("tokens", [])
+        motif_toks += king_march_for_rec(rec).get("tokens", [])
+    except Exception:
+        pass
 
-    # Weighted text_all: repeat high-signal tokens
+    text_dyn_gen = " ".join(general_toks + motif_toks)   # stored together for the dynamic field
+    text_dyn_sol = " ".join(solution_toks)
+    text_dyn     = " ".join(dyn_tokens + motif_toks)
+    text_static  = " ".join(static_toks + pocket_toks)
+    # Dedicated motif channel for RRF: ONLY the mate:/km: tokens, isolated from
+    # the dyn:/sum: flags they otherwise share text_dynamic_general with. This
+    # gives the mating-picture / king-march signal its own searchable field so
+    # a shared motif can surface a candidate independently of placement.
+    text_motif   = " ".join(motif_toks)
+
+    # Weighted text_all: repeat high-signal tokens. motif_toks (mate:/km:) get
+    # their own x3 -- on par with general flags, separable for query-side
+    # re-weighting later.
     text_all = " ".join(
         general_toks * 3 +
+        motif_toks * 3 +
         solution_toks * 2 +
         pocket_toks * 2 +
         static_toks
@@ -495,5 +527,6 @@ def encode_corpus_fields(rec: dict, static_toks: list[str], pocket_toks: list[st
         "text_dynamic_solution": text_dyn_sol,
         "text_dynamic":          text_dyn,
         "text_static":           text_static,
+        "text_motif":            text_motif,
         "text_all":              text_all,
     }

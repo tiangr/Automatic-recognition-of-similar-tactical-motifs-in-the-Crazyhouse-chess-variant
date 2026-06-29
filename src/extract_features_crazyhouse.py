@@ -38,7 +38,7 @@ import re
 import pandas as pd
 
 ROOT        = Path(__file__).resolve().parents[1]
-CORPUS      = ROOT / "data" / "derived" / "corpus_checkmates5.deduped.jsonl"
+CORPUS      = ROOT / "data" / "derived" / "corpus_checkmates5.jsonl"
 OUT_PARQUET = ROOT / "data" / "derived" / "puzzle_features_checkmates5_deduped.parquet"
 OUT_CSV     = ROOT / "data" / "derived" / "puzzle_features_checkmates5_deduped.csv"
 

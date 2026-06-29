@@ -31,7 +31,7 @@ from encodev2 import encode_dynamic_v2, encode_corpus_fields
 try:
     import joblib
     import pandas as pd
-    import pair_features as pf3      # shared train/serve feature module (same one the notebook uses)
+    import pair_features as pf      # shared train/serve feature module (same one the notebook uses)
     import pair_features_batch3 as pf3
     _HAS_RANKER = True
 except Exception as _e:
@@ -111,6 +111,50 @@ print(f"Engine path ({platform.system()}/{platform.machine()}): {ENGINE_PATH}")
 # ---------------------------------------------------------------------------
 # Lucene client
 # ---------------------------------------------------------------------------
+
+# ── Learned BM25 family weights ───────────────────────────────────────────────
+# Each retrieval token belongs to a 'family'. Repeating a family's tokens N times in
+# the query multiplies its BM25 contribution ~N×. These weights were learned offline
+# (placement/pv are the most discriminative; dyn/pocket/motif least). Tune here only.
+# Learned per-family query weights. Loaded from bm25_family_weights.json (produced by
+# the training notebook's weight-derivation cell) so retrieval always reflects the
+# latest data; falls back to these defaults if the file is absent.
+_FAMILY_WEIGHTS_DEFAULT = {"placement": 2, "relation": 2, "motif": 2, "pocket": 2,
+                          "pv": 4, "dyn": 2, "sum": 2}
+def _load_family_weights():
+    import os, json as _json
+    for cand in (str(CACHE_DIR / "bm25_family_weights.json"),
+                 "bm25_family_weights.json"):
+        try:
+            with open(cand) as fh:
+                w = (_json.load(fh) or {}).get("weights", {})
+            if w:
+                print(f"BM25 family weights loaded from {cand}: {w}")
+                return {**_FAMILY_WEIGHTS_DEFAULT, **{k: int(v) for k, v in w.items()}}
+        except FileNotFoundError:
+            continue
+        except Exception as _e:
+            print(f"BM25 family weights: failed to read {cand} ({_e}); using defaults")
+    print(f"BM25 family weights: using defaults {_FAMILY_WEIGHTS_DEFAULT}")
+    return dict(_FAMILY_WEIGHTS_DEFAULT)
+FAMILY_WEIGHTS = _load_family_weights()
+
+def _token_family(tok: str) -> str:
+    """Map a single retrieval token to its weight family."""
+    if tok.startswith("pv:"):     return "pv"
+    if tok.startswith("sum:"):    return "sum"
+    if tok.startswith("dyn:"):    return "dyn"
+    if "pocket:" in tok:          return "pocket"
+    if "@" in tok:               return "placement"
+    if any(c in tok for c in "<>="): return "relation"
+    return "motif"   # connectivity/pawn tags (I/L/S/W, lowercase i/l/p, brackets)
+
+def _weight_query_tokens(tokens) -> list:
+    """Repeat each token FAMILY_WEIGHTS[family] times so BM25 up-weights strong families."""
+    out = []
+    for t in tokens:
+        out.extend([t] * FAMILY_WEIGHTS.get(_token_family(t), 1))
+    return out
 
 def _lucene_search(query_tokens: str, field: str = "text_all",
                    topk: int = 10, exclude_id: str = "") -> list[dict]:
@@ -812,7 +856,7 @@ def search_by_fen():
         now be pulled into the top 10 on tactical/engine similarity.
       * ranker absent   -> original fast static-only BM25 top-K (unchanged).
     """
-    data      = request.get_json()
+    data      = request.get_json(silent=True) or {}
     raw_fen   = (data.get("board_fen") or data.get("fen") or "").strip()
     board_fen = raw_fen.split(" ")[0] if raw_fen else ""
     if "[" in board_fen:
@@ -820,12 +864,17 @@ def search_by_fen():
     parts = board_fen.split("/")
     if len(parts) == 9:
         board_fen = "/".join(parts[:8])
+        parts = board_fen.split("/")
+    # qfen_ robustness: a valid board has exactly 8 ranks. Reject early with a clear
+    # message (was: bare 400 "board_fen required" for empty/malformed FENs — the 3
+    # failing qfen_ queries had FENs that parsed to <8 ranks or empty).
+    if not board_fen or len(parts) != 8:
+        return jsonify({"error": f"invalid FEN: expected 8 board ranks, got {len(parts)}",
+                        "received_fen": (raw_fen[:120] or None)}), 400
 
     topk        = int(data.get("topk", 10))
-    pool_k      = int(data.get("pool_k", 100))    # wide pool the model reranks
+    pool_k      = int(data.get("pool_k", 300))    # wide pool the model reranks
     movetime_ms = int(data.get("movetime_ms", 1500))
-    if not board_fen:
-        return jsonify({"error": "board_fen required"}), 400
 
     pw = data.get("pockets_white")
     pb = data.get("pockets_black")
@@ -844,10 +893,12 @@ def search_by_fen():
         # 1) engine-encode the query so it has dynamic/tactical tokens
         q = _encode_query(board_fen, raw_fen, pw, pb, movetime_ms=movetime_ms)
         ref_turn = "black" if " b " in (raw_fen or "") else "white"
-        # 2) WIDE retrieval on text_all (dynamic*3 + pocket*2 + static*1)
-        query_tokens = " ".join(
-            q["dynamic_tokens"] * 3 + q["pocket_tokens"] * 2 + q["static_tokens"]
-        )
+        # 2) WIDE retrieval on text_all, weighting tokens by LEARNED family weights
+        #    (placement*4, pv*3, sum*2, relation/motif/dyn/pocket*1) instead of the
+        #    old flat dynamic*3 + pocket*2 + static*1.
+        query_tokens = " ".join(_weight_query_tokens(
+            q["static_tokens"] + q["dynamic_tokens"] + q["pocket_tokens"]
+        ))
         raw_hits = _lucene_search(query_tokens, "text_all", pool_k)
         hits = [_format_hit(h, i + 1) for i, h in enumerate(raw_hits)]
         hits = _drop_self_hit(hits, board_fen, pw, pb, raw_fen)

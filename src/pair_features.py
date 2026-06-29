@@ -46,13 +46,21 @@ _PLACEMENT_RE = re.compile(r"^[wbWB][pnbrqkPNBRQK]@")
 
 # fixed family order -> stable column order for the feature matrix
 STATIC_FAMILIES  = ["placement", "relation", "motif", "pocket"]
-DYNAMIC_FAMILIES = ["pv", "dyn", "sum"]
+# mate = final mating-picture tokens, km = king-march/forcing-sequence tokens.
+# Split out of "dyn" so retrieval can weight them independently (they were the
+# focus of the picture/march work and have their own predictive strength that
+# a shared dyn weight can't express).
+DYNAMIC_FAMILIES = ["pv", "dyn", "sum", "mate", "km"]
 ALL_FAMILIES     = STATIC_FAMILIES + DYNAMIC_FAMILIES
 
 
 def _family_of(tok: str) -> str | None:
     if not tok:
         return None
+    if tok.startswith("mate:"):
+        return "mate"
+    if tok.startswith("km:"):
+        return "km"
     if tok.startswith("pv:"):
         return "pv"
     if tok.startswith("dyn:"):
@@ -275,6 +283,487 @@ try:
     _HAS_CHESS = True
 except Exception:
     _HAS_CHESS = False
+
+# Shared piece-symbol table for the mate-picture / king-march sections below.
+_PT = {chess.PAWN: "P", chess.KNIGHT: "N", chess.BISHOP: "B",
+       chess.ROOK: "R", chess.QUEEN: "Q", chess.KING: "K"} if _HAS_CHESS else {}
+
+# =========================================================================
+# Mating picture (matna slika) -- folded final-position king-cage, merged
+# in from the former mate_picture.py module (now retired to keep file count
+# down). Colour+orientation-fold the 3x3 box around the mated king so the
+# same motif (e.g. smothered mate) collides to one token regardless of
+# corner/colour. See pair_features()'s mp_* block below for usage.
+# =========================================================================
+_MP_EMPTY = {"picture_canon": "", "region": "", "checker": "",
+             "cage_own": "", "net_enemy": "", "smother": False, "tokens": []}
+
+def _mp_replay(board, solution_uci):
+    """Push solution moves onto board in place; stop at first illegal move.
+    (Used only by the mate_picture section below; king_march uses its own
+    single-pass _core_from_start instead, since it needs per-ply detail.)"""
+    for u in [str(x) for x in (solution_uci or [])]:
+        try:
+            mv = chess.Move.from_uci(u)
+            if mv not in board.legal_moves and len(u) == 4:
+                mv2 = chess.Move.from_uci(u + "q")     # promo stored without suffix
+                if mv2 in board.legal_moves:
+                    mv = mv2
+            if mv not in board.legal_moves:
+                break
+            board.push(mv)
+        except Exception:
+            break
+    return board
+
+def _rot90(g):
+    return [[g[2 - c][r] for c in range(3)] for r in range(3)]
+
+def _mirror(g):
+    return [list(reversed(row)) for row in g]
+
+def _canon(grid):
+    forms, g = [], grid
+    for _ in range(4):
+        forms.append("/".join("".join(r) for r in g))
+        forms.append("/".join("".join(r) for r in _mirror(g)))
+        g = _rot90(g)
+    return min(forms)
+
+def _picture_from_board(b) -> dict:
+    if b is None or not b.is_checkmate():
+        return dict(_MP_EMPTY)
+    mated = b.turn
+    ksq = b.king(mated)
+    if ksq is None:
+        return dict(_MP_EMPTY)
+    kf, kr = chess.square_file(ksq), chess.square_rank(ksq)
+
+    grid = [["#"] * 3 for _ in range(3)]
+    own_adj, enemy_adj, empty_adj = [], [], []
+    for dr in (1, 0, -1):
+        for df in (-1, 0, 1):
+            gr, gc = 1 - dr, df + 1
+            f, r = kf + df, kr + dr
+            if not (0 <= f <= 7 and 0 <= r <= 7):
+                continue
+            if df == 0 and dr == 0:
+                grid[gr][gc] = "K"; continue
+            sq = chess.square(f, r)
+            pc = b.piece_at(sq)
+            if pc is None:
+                grid[gr][gc] = "."; empty_adj.append(sq)
+            elif pc.color == mated:
+                L = _PT[pc.piece_type]; grid[gr][gc] = L; own_adj.append(L)
+            else:
+                L = _PT[pc.piece_type].lower(); grid[gr][gc] = L; enemy_adj.append(L.upper())
+
+    picture_canon = _canon(grid)
+    walls = sum(row.count("#") for row in grid)
+    region = "corner" if walls == 5 else "edge" if walls == 3 else "center"
+
+    checkers = sorted({_PT[b.piece_at(s).piece_type] for s in b.checkers() if b.piece_at(s)})
+    checker = "".join(checkers)
+    cage_own = "".join(sorted(own_adj))
+
+    net = set(enemy_adj)
+    for sq in empty_adj:
+        for asq in b.attackers(not mated, sq):
+            apc = b.piece_at(asq)
+            if apc:
+                net.add(_PT[apc.piece_type])
+    net |= set(checkers)
+    net_enemy = "".join(sorted(net))
+
+    smother = (checker == "N" and not empty_adj and not enemy_adj
+               and len(own_adj) == (8 - walls))
+
+    tokens = [
+        f"mate:pic:{picture_canon}",
+        f"mate:region:{region}",
+        f"mate:checker:{checker}" if checker else "mate:checker:?",
+        f"mate:cage:{cage_own}" if cage_own else "mate:cage:none",
+        f"mate:net:{net_enemy}" if net_enemy else "mate:net:none",
+    ]
+    if smother:
+        tokens.append("mate:smother")
+
+    return {"picture_canon": picture_canon, "region": region, "checker": checker,
+            "cage_own": cage_own, "net_enemy": net_enemy, "smother": smother,
+            "tokens": tokens}
+
+def mate_picture(fen, solution_uci=None, turn=None) -> dict:
+    """Serve path: build from a (crazyhouse) FEN + solution and read the mate."""
+    if not _HAS_CHESS:
+        return dict(_MP_EMPTY)
+    bfen = _to_bracket_fen(fen, turn)
+    if not bfen:
+        return dict(_MP_EMPTY)
+    try:
+        b = chess.variant.CrazyhouseBoard(bfen)
+    except Exception:
+        return dict(_MP_EMPTY)
+    return _picture_from_board(_mp_replay(b, solution_uci))
+
+def mate_picture_for_rec(rec: dict) -> dict:
+    """Corpus path: reuse the dynamic encoder's event reconstruction (handles
+    full fen / prefix / uci+ply / board_fen incl. pockets), then replay the
+    solution and read the mate. Falls back to the FEN entry point."""
+    if not _HAS_CHESS:
+        return dict(_MP_EMPTY)
+    try:
+        from encodev2 import _reconstruct_event_board
+        board = _reconstruct_event_board(rec)
+        sol = rec.get("solution_uci") or rec.get("pv_before") or rec.get("pv_prev") or []
+        return _picture_from_board(_mp_replay(board, sol))
+    except Exception:
+        return mate_picture(rec.get("fen", "") or rec.get("board_fen", ""),
+                            rec.get("solution_uci"), rec.get("turn"))
+
+def picture_from_tokens(text_dynamic: str) -> dict:
+    out = {"picture_canon": "", "region": "", "checker": "",
+           "cage_own": "", "net_enemy": "", "smother": False}
+    found = False
+    for t in (text_dynamic or "").split():
+        if not t.startswith("mate:"):
+            continue
+        found = True
+        if   t.startswith("mate:pic:"):     out["picture_canon"] = t[len("mate:pic:"):]
+        elif t.startswith("mate:region:"):  out["region"]   = t[len("mate:region:"):]
+        elif t.startswith("mate:checker:"): out["checker"]  = t[len("mate:checker:"):].replace("?", "")
+        elif t.startswith("mate:cage:"):    out["cage_own"] = t[len("mate:cage:"):].replace("none", "")
+        elif t.startswith("mate:net:"):     out["net_enemy"]= t[len("mate:net:"):].replace("none", "")
+        elif t == "mate:smother":           out["smother"]  = True
+    return out if found else {}
+
+def get_picture(rec: dict) -> dict:
+    """Prefer parsing from stored tokens (no replay); else replay fen+solution."""
+    p = picture_from_tokens(rec.get("text_dynamic", ""))
+    if p:
+        return p
+    return mate_picture(rec.get("fen", ""), rec.get("solution_uci"), rec.get("turn"))
+
+def _ms_jac(a: str, b: str) -> float:
+    from collections import Counter
+    ca, cb = Counter(a), Counter(b)
+    keys = set(ca) | set(cb)
+    if not keys:
+        return 0.5
+    inter = sum(min(ca[k], cb[k]) for k in keys)
+    union = sum(max(ca[k], cb[k]) for k in keys)
+    return inter / union if union else 0.0
+
+def compare_pictures(qp: dict, cp: dict) -> dict:
+    have = bool(qp) and bool(cp) and qp.get("picture_canon") and cp.get("picture_canon")
+    if not have:
+        return {"mp_pic_match": 0.5, "mp_pic_cellsim": 0.5, "mp_region_match": 0.5,
+                "mp_checker_match": 0.5, "mp_smother_match": 0.5, "mp_both_smother": 0.0,
+                "mp_cage_sim": 0.5, "mp_net_sim": 0.5}
+    a, b = qp["picture_canon"], cp["picture_canon"]
+    f = {"mp_pic_match": 1.0 if a == b else 0.0}
+    f["mp_pic_cellsim"] = (sum(1 for x, y in zip(a, b) if x == y) / len(a)
+                           if (len(a) == len(b) and a) else 0.0)
+    f["mp_region_match"] = 1.0 if qp.get("region") == cp.get("region") else 0.0
+    qc, cc = qp.get("checker", ""), cp.get("checker", "")
+    f["mp_checker_match"] = (1.0 if qc and cc and qc == cc else 0.0 if qc and cc else 0.5)
+    qs, cs = bool(qp.get("smother")), bool(cp.get("smother"))
+    f["mp_smother_match"] = 1.0 if qs == cs else 0.0
+    f["mp_both_smother"]  = 1.0 if (qs and cs) else 0.0
+    f["mp_cage_sim"] = _ms_jac(qp.get("cage_own", ""), cp.get("cage_own", ""))
+    f["mp_net_sim"]  = _ms_jac(qp.get("net_enemy", ""), cp.get("net_enemy", ""))
+    return f
+
+def is_smother(fen, solution_uci=None, turn=None) -> bool:
+    """Convenience flag for the diagnostic script."""
+    return bool(mate_picture(fen, solution_uci, turn).get("smother"))
+
+MP_FEATURE_NAMES = ["mp_pic_match", "mp_pic_cellsim", "mp_region_match",
+                    "mp_checker_match", "mp_smother_match", "mp_both_smother",
+                    "mp_cage_sim", "mp_net_sim"]
+
+
+# =========================================================================
+# King march (forcing-sequence features) -- merged in from the former
+# king_march.py module. Encodes the PATH the king is forced along: which
+# line/square each check comes from, whether the same piece/square checks
+# repeatedly, whether the mating move itself is a drop vs a moved piece,
+# and which figures (attacker net vs defender's own cage) cooperate around
+# the final mated-king square. Complements the mate picture (final
+# position only) rather than replacing it.
+# =========================================================================
+_KM_EMPTY = {"king_path": [], "king_displacement": 0, "forced_king_moves": 0,
+             "check_lines": [], "same_line_run": 0, "checker_seq": [],
+             "repeat_checker_run": 0, "same_square_checker_run": 0,
+             "mate_is_drop": False, "cooperating_types": "", "tokens": []}
+
+def _check_line(king_sq, from_sq):
+    """Coarse geometric relation of a checking piece's square to the king."""
+    kf, kr = chess.square_file(king_sq), chess.square_rank(king_sq)
+    ff, fr = chess.square_file(from_sq), chess.square_rank(from_sq)
+    df, dr = ff - kf, fr - kr
+    if df == 0 and dr == 0:
+        return "other"
+    if max(abs(df), abs(dr)) == 1:
+        return "adjacent"
+    if df == 0:
+        return "file"
+    if dr == 0:
+        return "rank"
+    if abs(df) == abs(dr):
+        return "diag"
+    if (abs(df), abs(dr)) in ((1, 2), (2, 1)):
+        return "knight"
+    return "other"
+
+def _longest_run(seq):
+    if not seq:
+        return 0
+    best = cur = 1
+    for i in range(1, len(seq)):
+        cur = cur + 1 if seq[i] == seq[i - 1] else 1
+        best = max(best, cur)
+    return best
+
+def _core_from_start(board_start, pushed, mating_side, mated_side):
+    """Single forward replay from the TRUE pre-line position (no pop/copy
+    tricks, which desync Crazyhouse pockets). board_start is mutated in place
+    by pushing; caller must pass a board it's OK to consume."""
+    out = dict(_KM_EMPTY)
+    if not pushed:
+        return out
+
+    b = board_start
+    king_path = [b.king(mated_side)]
+    check_lines, checker_seq, from_sqs = [], [], []
+    mate_is_drop = False
+    board_final = None
+
+    for i, mv in enumerate(pushed):
+        mover = b.turn
+        is_last = (i == len(pushed) - 1)
+        b.push(mv)
+        if mover == mated_side:
+            ksq = b.king(mated_side)
+            if ksq is not None and ksq != king_path[-1]:
+                king_path.append(ksq)
+        if mover == mating_side and b.is_check():
+            ksq = b.king(mated_side)
+            if ksq is not None:
+                check_lines.append(_check_line(ksq, mv.to_square))
+            pc = b.piece_at(mv.to_square)
+            if pc is not None:
+                checker_seq.append(_PT.get(pc.piece_type, "?"))
+            from_sqs.append(mv.to_square)
+        if is_last and mover == mating_side and mv.drop is not None:
+            mate_is_drop = True
+        if is_last:
+            board_final = b   # final position, post all pushes
+
+    out["king_path"] = king_path
+    if len(king_path) >= 2:
+        kf0, kr0 = chess.square_file(king_path[0]), chess.square_rank(king_path[0])
+        kf1, kr1 = chess.square_file(king_path[-1]), chess.square_rank(king_path[-1])
+        out["king_displacement"] = max(abs(kf1 - kf0), abs(kr1 - kr0))
+    out["forced_king_moves"] = len(king_path) - 1
+    out["check_lines"] = check_lines
+    out["same_line_run"] = _longest_run(check_lines)
+    out["checker_seq"] = checker_seq
+    out["repeat_checker_run"] = _longest_run(checker_seq)
+    out["mate_is_drop"] = mate_is_drop
+    out["same_square_checker_run"] = _longest_run(from_sqs)
+
+    # cooperating pieces: every checker TYPE (mating side) plus every piece
+    # of EITHER side adjacent to the final mated-king square -- the mating
+    # side's pieces forming the net, AND the mated side's own pieces forming
+    # the cage (e.g. the smother's own rook+pawns). Colour-folded by role:
+    # 'A:' prefix for attacker-adjacent types, 'D:' prefix for defender's own
+    # adjacent types, so a smother (all-defender cage) and a net-mate
+    # (all-attacker net) remain distinguishable rather than collapsing into
+    # one undifferentiated multiset.
+    atk_adj, def_adj = set(), set()
+    ksq = king_path[-1]
+    kf, kr = chess.square_file(ksq), chess.square_rank(ksq)
+    for df in (-1, 0, 1):
+        for dr in (-1, 0, 1):
+            if df == 0 and dr == 0:
+                continue
+            f, r = kf + df, kr + dr
+            if 0 <= f <= 7 and 0 <= r <= 7:
+                pc = board_final.piece_at(chess.square(f, r))
+                if pc is None:
+                    continue
+                t = _PT.get(pc.piece_type, "?")
+                if pc.color == mating_side:
+                    atk_adj.add(t)
+                else:
+                    def_adj.add(t)
+    atk_all = set(checker_seq) | atk_adj
+    out["cooperating_types"] = "A" + "".join(sorted(atk_all)) + "D" + "".join(sorted(def_adj))
+
+    out["tokens"] = [
+        f"km:line:{'-'.join(check_lines)}" if check_lines else "km:line:none",
+        f"km:checkers:{'-'.join(checker_seq)}" if checker_seq else "km:checkers:none",
+        f"km:disp:{out['king_displacement']}",
+        f"km:sameline:{out['same_line_run']}",
+        f"km:samepiece:{out['repeat_checker_run']}",
+        f"km:samesquare:{out['same_square_checker_run']}",
+        f"km:coop:{out['cooperating_types']}" if out["cooperating_types"] else "km:coop:none",
+    ]
+    if mate_is_drop:
+        out["tokens"].append("km:matebydrop")
+    return out
+
+def king_march(fen, solution_uci=None, turn=None) -> dict:
+    if not _HAS_CHESS:
+        return dict(_KM_EMPTY)
+    bfen = _to_bracket_fen(fen, turn)
+    if not bfen:
+        return dict(_KM_EMPTY)
+    try:
+        board = chess.variant.CrazyhouseBoard(bfen)
+    except Exception:
+        return dict(_KM_EMPTY)
+    mating_side = board.turn
+    mated_side = not mating_side
+    uci = [str(u) for u in (solution_uci or [])]
+    pushed = []
+    for u in uci:
+        try:
+            mv = chess.Move.from_uci(u)
+            if mv not in board.legal_moves and len(u) == 4:
+                mv2 = chess.Move.from_uci(u + "q")
+                if mv2 in board.legal_moves:
+                    mv = mv2
+            if mv not in board.legal_moves:
+                break
+            pushed.append(mv)
+        except Exception:
+            break
+    # validate the FULL line leads to checkmate before committing to the
+    # real replay (cheap dry run on a throwaway copy)
+    check_board = board.copy()
+    ok = True
+    for mv in pushed:
+        if mv not in check_board.legal_moves:
+            ok = False
+            break
+        check_board.push(mv)
+    if not ok or not pushed or not check_board.is_checkmate():
+        return dict(_KM_EMPTY)
+    return _core_from_start(board, pushed, mating_side, mated_side)
+
+def king_march_for_rec(rec: dict) -> dict:
+    if not _HAS_CHESS:
+        return dict(_KM_EMPTY)
+    try:
+        from encodev2 import _reconstruct_event_board
+        board = _reconstruct_event_board(rec)
+        mating_side = board.turn
+        mated_side = not mating_side
+        uci = [str(u) for u in (rec.get("solution_uci") or [])]
+        pushed = []
+        for u in uci:
+            try:
+                mv = chess.Move.from_uci(u)
+                if mv not in board.legal_moves and len(u) == 4:
+                    mv2 = chess.Move.from_uci(u + "q")
+                    if mv2 in board.legal_moves:
+                        mv = mv2
+                if mv not in board.legal_moves:
+                    break
+                pushed.append(mv)
+            except Exception:
+                break
+        check_board = board.copy()
+        ok = True
+        for mv in pushed:
+            if mv not in check_board.legal_moves:
+                ok = False
+                break
+            check_board.push(mv)
+        if not ok or not pushed or not check_board.is_checkmate():
+            return dict(_KM_EMPTY)
+        return _core_from_start(board, pushed, mating_side, mated_side)
+    except Exception:
+        return king_march(rec.get("fen", "") or rec.get("board_fen", ""),
+                          rec.get("solution_uci"), rec.get("turn"))
+
+def march_from_tokens(text_dynamic: str) -> dict:
+    out = {"check_lines": [], "checker_seq": [], "king_displacement": 0,
+           "same_line_run": 0, "repeat_checker_run": 0,
+           "same_square_checker_run": 0, "cooperating_types": "",
+           "mate_is_drop": False}
+    found = False
+    for t in (text_dynamic or "").split():
+        if not t.startswith("km:"):
+            continue
+        found = True
+        if t.startswith("km:line:"):
+            v = t[len("km:line:"):]
+            out["check_lines"] = [] if v == "none" else v.split("-")
+        elif t.startswith("km:checkers:"):
+            v = t[len("km:checkers:"):]
+            out["checker_seq"] = [] if v == "none" else v.split("-")
+        elif t.startswith("km:disp:"):
+            out["king_displacement"] = int(t[len("km:disp:"):])
+        elif t.startswith("km:sameline:"):
+            out["same_line_run"] = int(t[len("km:sameline:"):])
+        elif t.startswith("km:samepiece:"):
+            out["repeat_checker_run"] = int(t[len("km:samepiece:"):])
+        elif t.startswith("km:samesquare:"):
+            out["same_square_checker_run"] = int(t[len("km:samesquare:"):])
+        elif t.startswith("km:coop:"):
+            v = t[len("km:coop:"):]
+            out["cooperating_types"] = "" if v == "none" else v
+        elif t == "km:matebydrop":
+            out["mate_is_drop"] = True
+    return out if found else {}
+
+def get_march(rec: dict) -> dict:
+    p = march_from_tokens(rec.get("text_dynamic", ""))
+    if p:
+        return p
+    return king_march(rec.get("fen", ""), rec.get("solution_uci"), rec.get("turn"))
+
+def _list_jac(a: list, b: list) -> float:
+    from collections import Counter
+    ca, cb = Counter(a), Counter(b)
+    keys = set(ca) | set(cb)
+    if not keys:
+        return 0.5
+    inter = sum(min(ca[k], cb[k]) for k in keys)
+    union = sum(max(ca[k], cb[k]) for k in keys)
+    return inter / union if union else 0.0
+
+def compare_marches(qm: dict, cm: dict) -> dict:
+    have = bool(qm) and bool(cm) and (qm.get("checker_seq") is not None) \
+           and (cm.get("checker_seq") is not None) and (qm.get("check_lines") or qm.get("checker_seq"))
+    have = have and (cm.get("check_lines") or cm.get("checker_seq"))
+    if not have:
+        return {"km_line_seq_match": 0.5, "km_checker_seq_match": 0.5,
+                "km_line_jac": 0.5, "km_checker_jac": 0.5,
+                "km_disp_sim": 0.5, "km_sameline_match": 0.5,
+                "km_samepiece_match": 0.5, "km_samesquare_match": 0.5,
+                "km_coop_sim": 0.5, "km_drop_mate_match": 0.5}
+    f = {}
+    f["km_line_seq_match"]    = 1.0 if qm["check_lines"] == cm["check_lines"] else 0.0
+    f["km_checker_seq_match"] = 1.0 if qm["checker_seq"] == cm["checker_seq"] else 0.0
+    f["km_line_jac"]    = _list_jac(qm["check_lines"], cm["check_lines"])
+    f["km_checker_jac"] = _list_jac(qm["checker_seq"], cm["checker_seq"])
+    qd, cd = qm.get("king_displacement", 0), cm.get("king_displacement", 0)
+    f["km_disp_sim"] = 1.0 - min(abs(qd - cd), 7) / 7.0
+    f["km_sameline_match"]   = 1.0 if qm.get("same_line_run") == cm.get("same_line_run") else 0.0
+    f["km_samepiece_match"]  = 1.0 if qm.get("repeat_checker_run") == cm.get("repeat_checker_run") else 0.0
+    f["km_samesquare_match"] = 1.0 if qm.get("same_square_checker_run") == cm.get("same_square_checker_run") else 0.0
+    f["km_coop_sim"] = _list_jac(list(qm.get("cooperating_types", "")), list(cm.get("cooperating_types", "")))
+    f["km_drop_mate_match"] = 1.0 if bool(qm.get("mate_is_drop")) == bool(cm.get("mate_is_drop")) else 0.0
+    return f
+
+KM_FEATURE_NAMES = ["km_line_seq_match", "km_checker_seq_match", "km_line_jac",
+                    "km_checker_jac", "km_disp_sim", "km_sameline_match",
+                    "km_samepiece_match", "km_samesquare_match", "km_coop_sim",
+                    "km_drop_mate_match"]
+
 
 
 def _to_bracket_fen(fen, turn):
@@ -691,6 +1180,38 @@ def pair_features(query: dict, cand: dict) -> dict:
     feats["fb_same_matepiece_sq"] = 1.0 if (qp is not None and cp is not None and qp == cp) else 0.0
     feats["fb_capsq_jac"]   = _jaccard(set(q_st.get("cap_sqs") or ()), set(c_st.get("cap_sqs") or ()))
     feats["fb_checker_jac"] = _jaccard(set(q_st.get("checkers") or ()), set(c_st.get("checkers") or ()))
+
+    # --- mating picture (matna slika): the colour+orientation-folded cage
+    # around the mated king at the FINAL position. Picture tokens are read
+    # from stored dynamic text when present (corpus), else replayed live.
+    # (get_picture/compare_pictures degrade to neutral 0.5s on their own if
+    # python-chess is unavailable or the line doesn't resolve to mate, so no
+    # outer availability flag is needed here.)
+    q_pic = get_picture({"text_dynamic": query.get("text_dynamic", ""),
+                         "fen": query.get("fen", ""),
+                         "solution_uci": query.get("solution_uci"),
+                         "turn": query.get("turn")})
+    c_pic = get_picture({"text_dynamic": cand.get("text_dynamic", ""),
+                         "fen": cand.get("fen", ""),
+                         "solution_uci": cand.get("solution_uci"),
+                         "turn": cand.get("turn")})
+    feats.update(compare_pictures(q_pic, c_pic))
+
+    # --- king march (forcing sequence): which line/squares the checks
+    # come from, whether the same piece/square checks repeatedly, whether
+    # the mating move is a drop vs a moved piece, and which figures (both
+    # attacker net and defender cage) cooperate around the final mated
+    # king. Complements the mating picture (final position only) with the
+    # PATH taken to get there.
+    q_km = get_march({"text_dynamic": query.get("text_dynamic", ""),
+                      "fen": query.get("fen", ""),
+                      "solution_uci": query.get("solution_uci"),
+                      "turn": query.get("turn")})
+    c_km = get_march({"text_dynamic": cand.get("text_dynamic", ""),
+                      "fen": cand.get("fen", ""),
+                      "solution_uci": cand.get("solution_uci"),
+                      "turn": cand.get("turn")})
+    feats.update(compare_marches(q_km, c_km))
 
     return feats
 

@@ -71,6 +71,7 @@ public class CrazyhouseLuceneServer {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/search", new SearchHandler());
+        server.createContext("/rrf",    new RrfHandler());
         server.createContext("/doc",    new DocHandler());
         server.createContext("/status", new StatusHandler());
         server.setExecutor(Executors.newFixedThreadPool(4));
@@ -169,6 +170,7 @@ public class CrazyhouseLuceneServer {
         String textDyn    = strOrEmpty(jsonStr(line, "text_dynamic"));
         String textDynGen = strOrEmpty(jsonStr(line, "text_dynamic_general"));
         String textDynSol = strOrEmpty(jsonStr(line, "text_dynamic_solution"));
+        String textMotif  = strOrEmpty(jsonStr(line, "text_motif"));
 
         doc.add(new StoredField("text_dynamic", textDyn));
         doc.add(new StoredField("text_static",  textStatic));
@@ -177,6 +179,7 @@ public class CrazyhouseLuceneServer {
         doc.add(new TextField("text_static",           textStatic, Field.Store.NO));
         doc.add(new TextField("text_dynamic_general",  textDynGen, Field.Store.NO));
         doc.add(new TextField("text_dynamic_solution", textDynSol, Field.Store.NO));
+        doc.add(new TextField("text_motif",            textMotif,  Field.Store.NO));
 
         return doc;
     }
@@ -199,7 +202,7 @@ public class CrazyhouseLuceneServer {
                 BooleanQuery.Builder bqb = new BooleanQuery.Builder();
                 for (String token : q.split("\\s+")) {
                     if (token.isEmpty()) continue;
-                    bqb.add(new BoostQuery(new TermQuery(new Term(field, QueryParser.escape(token))), 1.0f),
+                    bqb.add(new BoostQuery(new TermQuery(new Term(field, token)), 1.0f),
                             BooleanClause.Occur.SHOULD);
                 }
                 bqb.setMinimumNumberShouldMatch(1);
@@ -217,6 +220,92 @@ public class CrazyhouseLuceneServer {
                     if (!excludeBase.isEmpty() && baseGameId(docId).equals(excludeBase)) continue;
                     if (rank > 0) sb.append(",");
                     sb.append(docToJson(doc, sd.score, rank + 1));
+                    rank++;
+                }
+                sb.append("]");
+                respond(ex, 200, sb.toString());
+
+            } catch (Exception e) {
+                respond(ex, 500, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
+            }
+        }
+    }
+
+    /**
+     * Reciprocal Rank Fusion across multiple fields. Each field is queried
+     * independently (per-field BM25 ranking); a document's fused score is
+     * sum over fields of weight_field / (K + rank_in_that_field). A doc ranked
+     * highly on ONE field (e.g. shares the mating-picture motif) surfaces even
+     * if it ranks poorly on placement -- the "same motif, different board" case.
+     *
+     * GET /rrf?q=<tokens>&topk=10
+     *         &fields=text_motif,text_static,text_dynamic_general,text_dynamic_solution
+     *         &weights=2,1,1,1&k=60&exclude_id=<id>
+     * The SAME q tokens are searched in every field (whitespace analyzer, so a
+     * token that doesn't occur in a field simply doesn't match there).
+     */
+    static class RrfHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange ex) throws IOException {
+            try {
+                Map<String, String> params = parseQuery(ex.getRequestURI().getQuery());
+                String q           = params.getOrDefault("q", "");
+                int    topk        = Integer.parseInt(params.getOrDefault("topk", "10"));
+                int    K           = Integer.parseInt(params.getOrDefault("k", "60"));
+                String excludeId   = params.getOrDefault("exclude_id", "");
+                String excludeBase = baseGameId(excludeId);
+                if (q.isEmpty()) { respond(ex, 400, "{\"error\":\"q required\"}"); return; }
+
+                String[] fields = params.getOrDefault("fields",
+                        "text_motif,text_static,text_dynamic_general,text_dynamic_solution")
+                        .split(",");
+                String[] wStr = params.getOrDefault("weights", "").split(",");
+                double[] weights = new double[fields.length];
+                for (int i = 0; i < fields.length; i++) {
+                    weights[i] = 1.0;
+                    if (i < wStr.length && !wStr[i].isEmpty()) {
+                        try { weights[i] = Double.parseDouble(wStr[i]); } catch (Exception ignore) {}
+                    }
+                }
+
+                String[] tokens = q.split("\\s+");
+                int perField = Math.min(topk * 20 + 100, reader.numDocs());
+
+                Map<Integer, Double> fused = new HashMap<>();
+                for (int fi = 0; fi < fields.length; fi++) {
+                    String field = fields[fi].trim();
+                    if (field.isEmpty()) continue;
+                    BooleanQuery.Builder bqb = new BooleanQuery.Builder();
+                    boolean any = false;
+                    for (String token : tokens) {
+                        if (token.isEmpty()) continue;
+                        bqb.add(new BoostQuery(new TermQuery(new Term(field, token)), 1.0f),
+                                BooleanClause.Occur.SHOULD);
+                        any = true;
+                    }
+                    if (!any) continue;
+                    bqb.setMinimumNumberShouldMatch(1);
+                    TopDocs td = searcher.search(bqb.build(), perField);
+                    for (int rank = 0; rank < td.scoreDocs.length; rank++) {
+                        int docId = td.scoreDocs[rank].doc;
+                        double contrib = weights[fi] / (K + rank + 1.0);
+                        fused.merge(docId, contrib, Double::sum);
+                    }
+                }
+
+                List<Map.Entry<Integer, Double>> ordered = new ArrayList<>(fused.entrySet());
+                ordered.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
+
+                StringBuilder sb = new StringBuilder("[");
+                int rank = 0;
+                for (Map.Entry<Integer, Double> e : ordered) {
+                    if (rank >= topk) break;
+                    Document doc = searcher.storedFields().document(e.getKey());
+                    String docId = doc.get("id");
+                    if (docId.equals(excludeId)) continue;
+                    if (!excludeBase.isEmpty() && baseGameId(docId).equals(excludeBase)) continue;
+                    if (rank > 0) sb.append(",");
+                    sb.append(docToJson(doc, e.getValue().floatValue(), rank + 1));
                     rank++;
                 }
                 sb.append("]");
